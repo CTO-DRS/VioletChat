@@ -1,6 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:violet_chat/services/violet_auth_service.dart';
@@ -131,7 +130,9 @@ void main() {
       // ينجح ثم معاملة users/{uid} تُرفض لأن قواعد firestore.rules
       // غير منشورة على Console. الرسالة يجب أن تسمّي الإجراء المطلوب
       // (نشر القواعد) بدل التشخيص العام بالرمز.
-      const e = FirebaseException(
+      // FirebaseException في النسخة المثبتة بلا مُنشئ const — حرفياً
+      // كما تصدرها الإضافة ميدانياً (رسالة الخطأ الأصلية للمالك).
+      final e = FirebaseException(
         plugin: 'cloud_firestore',
         code: 'permission-denied',
         message:
@@ -148,16 +149,16 @@ void main() {
     });
 
     test('انقطاع Firestore (unavailable) يرجع رسالة شبكة واضحة', () {
-      const e = FirebaseException(
+      final e = FirebaseException(
           plugin: 'cloud_firestore', code: 'unavailable');
       expect(VioletAuthErrors.messageAr(e), contains('تحقق من الإنترنت'));
-      const t = FirebaseException(
+      final t = FirebaseException(
           plugin: 'cloud_firestore', code: 'deadline-exceeded');
       expect(VioletAuthErrors.messageAr(t), contains('تحقق من الإنترنت'));
     });
 
     test('FirebaseException أخرى تظل تمر عبر التشخيص العام الصادق', () {
-      const e = FirebaseException(
+      final e = FirebaseException(
           plugin: 'cloud_firestore', code: 'some-future-code');
       final ar = VioletAuthErrors.messageAr(e);
       expect(ar, contains('رمز:'));
