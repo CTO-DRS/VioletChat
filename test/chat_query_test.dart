@@ -18,7 +18,7 @@ void main() {
   Chat direct(Profile p) =>
       Chat(id: 'c-${p.id}', type: 'direct', peer: p, createdAt: 'x');
 
-  Chat group(String name) =>
+  Chat mkGroup(String name) =>
       Chat(id: 'g-$name', type: 'group', name: name, createdAt: 'x');
 
   group('normalizeAr — التطبيع العربي المتسامح', () {
@@ -37,7 +37,7 @@ void main() {
 
   group('chatMatchesQuery — مطابقة المحادثة', () {
     final ali = peer('u1', 'ali_dev', 'علي الحسن');
-    final devGroup = group('فريق التطوير');
+    final devGroup = mkGroup('فريق التطوير');
 
     test('الاستعلام الفارغ يطابق كل شيء', () {
       expect(chatMatchesQuery(direct(ali), ''), isTrue);
@@ -73,7 +73,7 @@ void main() {
     test('يصفّي المحادثات والأصدقاء بذات المنطق', () {
       final ali = peer('u1', 'ali_dev', 'علي الحسن');
       final sara = peer('u2', 'sara', 'سارة');
-      final chats = [direct(ali), direct(sara), group('فريق التطوير')];
+      final chats = [direct(ali), direct(sara), mkGroup('فريق التطوير')];
       expect(filterChats(chats, 'تطوير'), hasLength(1));
       expect(filterChats(chats, 'ساره'), hasLength(1));
       expect(filterProfiles([ali, sara], 'ali'), hasLength(1));
