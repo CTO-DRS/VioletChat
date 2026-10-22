@@ -1,0 +1,139 @@
+plugins {
+    id "com.android.application"
+    id "kotlin-android"
+    id "dev.flutter.flutter-gradle-plugin"
+}
+
+def localProperties = new Properties()
+def localPropertiesFile = rootProject.file("local.properties")
+if (localPropertiesFile.exists()) {
+    localPropertiesFile.withReader("UTF-8") { reader ->
+        localProperties.load(reader)
+    }
+}
+
+def keystoreProperties = new Properties()
+def keystorePropertiesFile = rootProject.file("key.properties")
+if (keystorePropertiesFile.exists()) {
+    keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+}
+
+android {
+    namespace = "com.drs.nexora"
+
+    lint {
+        checkReleaseBuilds = false
+        abortOnError = false
+    }
+    compileSdk = 35
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+        coreLibraryDesugaringEnabled = true
+    }
+
+    kotlinOptions {
+        jvmTarget = "17"
+    }
+
+    defaultConfig {
+        applicationId = "com.drs.nexora"
+        // v0.1.0: 24 = الحد الأدنى الذي يفرضه محرك Flutter 3.35 نفسه
+        // (embedding AAR يصرّح بـ minSdk 24، وmanifest merger يأخذ القيمة
+        // القصوى مهما ضبطنا هنا — جرّبنا 23 فرُدّت إلى 24 آلياً). تثبيت
+        // القيمة صراحةً يجعل المصدر صادقاً مع الـ APK المنتج. خفض هذا
+        // الحد لدعم أندرويد 6 يتطلب إنزال Flutter كاملاً — قرار مؤجل.
+        minSdk = 24
+        targetSdk = 35
+        versionCode = flutter.versionCode
+        versionName = flutter.versionName
+        // v0.1.0: per-ABI APKs come from `flutter build apk
+        // --split-per-abi`. abiFilters additionally keeps plugin AAR JNI
+        // libs (webrtc/record) OUT of non-arm ABIs — without it gradle
+        // packages a PARTIAL x86_64 lib set (no libflutter.so) which
+        // crashes x86 emulators and bloats the universal APK ~5x.
+        // Split builds (--split-per-abi) enable AGP splits.abi — combining
+        // them with ndk.abiFilters is a hard gradle error ("Conflicting
+        // configuration"), so apply the filter ONLY for the universal
+        // (non-split) build, where it strips the partial x86_64 plugin
+        // lib set (no libflutter.so) that crashes emulators and bloats
+        // the APK ~5x. The split invocation limits ABIs via
+        // --target-platform instead. `split-per-abi` is the exact gradle
+        // property the Flutter tool itself passes to detect split builds.
+        if (!project.hasProperty('split-per-abi')) {
+            ndk {
+                abiFilters 'armeabi-v7a', 'arm64-v8a'
+            }
+        }
+    }
+
+    // v0.1.0: مكتبتان x86_64 يتسربان من AARات الاعتماديات
+    // (libdatastore_shared_counter + libjingle_peerconnection_so) بلا
+    // libflutter.so لهما — لا فائدة منهما على المحاكيات (تنهار عند
+    // تحميل محرك Flutter) و~6.7MB حجماً زائداً في الحزمة الشاملة.
+    // abiFilters أعلاه لا يغطي هذين الـ AAR، فالاستبعاد الصريح هو
+    // الضمانة. لا أثر للمعمارية x86_64 في أي حزمة منشورة.
+    packaging {
+        jniLibs {
+            excludes += ['lib/x86_64/**']
+            // v0.1.3: التغليف القياسي المضغوط (extractNativeLibs=true) بدل
+            // التخزين الخام. كل المكتبات ELF متوافقة 16KB أصلاً (p_align
+            // >= 16384 — فُحصت بايتياً) فلا خطر وظيفي، والمكسب مزدوج:
+            // 1) APK أصغر ~35% — تنزيل أوثق على شبكات الجوال وأقل عرضة
+            //    للتقطيع (السبب الأشهر لرسالة «الحزمة تبدو غير صالحة»).
+            // 2) الحزمة الشاملة تنزل تحت حد 50MB فترفع على مرآة التحميل
+            //    كملف واحد يعمل على كل الهواتف دون اختيار معمارية.
+            useLegacyPackaging = true
+        }
+    }
+
+    // CI (GitHub Actions) builds with NDK 26.1 present, so default
+    // native-lib stripping (llvm-strip, drop debug symbol tables) runs
+    // again — shipping unstripped .so files bloated the APKs ~5x
+    // (webrtc alone carries >100MB of symbol tables per ABI).
+    // Note: extractReleaseNativeSymbolTables stays disabled in the root
+    // build.gradle (side artifact only, never part of the APK).
+
+    signingConfigs {
+        if (keystorePropertiesFile.exists()) {
+            release {
+                keyAlias = keystoreProperties["keyAlias"] as String
+                keyPassword = keystoreProperties["keyPassword"] as String
+                storeFile = keystoreProperties["storeFile"] ? file(keystoreProperties["storeFile"]) : null
+                storePassword = keystoreProperties["storePassword"] as String
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            // Signs with the CI keystore when key.properties exists,
+            // otherwise falls back to the debug key (installable builds
+            // for testing; production signing documented in BUILD.md).
+            signingConfig = keystorePropertiesFile.exists()
+                ? signingConfigs.release
+                : signingConfigs.debug
+            minifyEnabled = false
+            shrinkResources = false
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
+        }
+    }
+}
+
+flutter {
+    source = "../.."
+}
+
+dependencies {
+    coreLibraryDesugaring "com.android.tools:desugar_jdk_libs:2.1.2"
+}
+
+// FCM: activate only when google-services.json exists in android/app/.
+// Absent file => build still succeeds; system push stays disabled.
+if (file("google-services.json").exists()) {
+    apply plugin: "com.google.gms.google-services"
+}

@@ -1,0 +1,53 @@
+allprojects {
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+rootProject.buildDir = "../build"
+subprojects {
+    project.buildDir = "${rootProject.buildDir}/${project.name}"
+}
+subprojects {
+    project.evaluationDependsOn(":app")
+}
+
+// v0.1.0 disk-constrained build recipe (re-applies the v0.1.0 approach):
+// plugins declare their own compileSdk (34/36) which would force AGP to
+// download extra SDK platforms. Unify every Android plugin module to the
+// app's compileSdk 35 — all plugin code compiles against 35 symbols.
+subprojects {
+    // :app is evaluated early (evaluationDependsOn above) and already
+    // pins compileSdk 35 itself — only library plugins need the override.
+    if (project.path != ":app") {
+        afterEvaluate { proj ->
+            def androidExt = proj.extensions.findByName("android")
+            if (androidExt != null && androidExt.hasProperty("compileSdk")) {
+                androidExt.compileSdk = 35
+            }
+        }
+    }
+}
+
+// v0.1.0 disk-constrained build recipe: native debug-symbol tables are
+// a side artifact for crash symbolication upload (never part of the
+// APK). The .so files ship prebuilt-stripped upstream, so extracting
+// symbol tables needs llvm-objcopy plus hundreds of MB of intermediates
+// for zero user value on this runner.
+tasks.whenTaskAdded { task ->
+    if (task.name == 'extractReleaseNativeSymbolTables') {
+        task.enabled = false
+    }
+    // v0.1.0 disk-constrained: ART baseline-profile compilation (.dm)
+    // is a cold-start optimization only. On this runner its output kept
+    // getting truncated by ENOSPC and failing packaging; the APK ships
+    // fine without it (no functional difference).
+    if (task.name == 'compileReleaseArtProfile') {
+        task.enabled = false
+    }
+}
+
+tasks.register("clean", Delete) {
+    delete rootProject.buildDir
+}

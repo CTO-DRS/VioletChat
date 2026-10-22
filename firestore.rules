@@ -1,0 +1,49 @@
+rules_version = '2';
+
+// ============================================================
+// Violet Chat — Cloud Firestore Security Rules (v0.1.0)
+// ============================================================
+// قواعد صارمة: قاعدة البيانات ليست مفتوحة للقراءة أو الكتابة
+// العامة إطلاقاً. كل وثيقة ملف مستخدم مقفلة على مالكها (UID من
+// Firebase Authentication). لا بديل تشخيصي «مفتوح للاختبار» هنا —
+// الاختبار يتم عبر محاكي Firebase (firebase emulators) أو بحساب
+// حقيقي بعد التفعيل.
+//
+// النشر:
+//   firebase deploy --only firestore:rules
+// أو لصق المحتوى في: Firebase Console → Firestore → Rules.
+// (الخطوات الكاملة: docs/FIREBASE_SETUP.md)
+// ============================================================
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ملف المستخدم: المالك وحده يقرأ ويكتب.
+    // لا مستخدم يستطيع قراءة ملفات الآخرين أو تعديلها بأي حال.
+    match /users/{uid} {
+      allow read: if isOwner(uid);
+      allow create: if isOwner(uid) && validProfileCreate();
+      // التحديث لا يغير uid ولا email (الهوية الأساسية ثابتة).
+      allow update: if isOwner(uid)
+                    && request.resource.data.uid == uid
+                    && request.resource.data.email == resource.data.email;
+      allow delete: if false; // حذف الملف ليس ميزة في v0.1.0
+    }
+
+    // أي مسار آخر مرفوض صراحةً (deny-by-default صريح).
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
+
+function isOwner(uid) {
+  return request.auth != null && request.auth.uid == uid;
+}
+
+function validProfileCreate() {
+  return request.resource.data.uid == uid
+         && request.resource.data.displayName is string
+         && request.resource.data.displayName.size() >= 2
+         && request.resource.data.email is string;
+}

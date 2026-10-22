@@ -1,0 +1,90 @@
+name: violet_chat
+description: "Violet Chat — تطبيق مراسلة Android بهوية بنفسجية، مراسلة مشفرة طرف-لطرف مع Firebase Authentication وCloud Firestore"
+publish_to: 'none'
+
+# v0.1.0 — الإصدار الأولي بهوية Violet Chat.
+# versionCode 7 (لا 1): سجل المشروع (الإصدارات المنشورة سابقاً باسم
+# DRS NEXORA بنفس applicationId) وصل إلى 6 — code أقل سيرفض أندرويد
+# تثبيته كتحديث فوق النسخ المثبتة.
+version: 0.1.0+7
+
+environment:
+  sdk: '>=3.5.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # --- Arabic localization (v0.1.0) ---
+  # Fixes a real field bug: locale 'ar' was set without any delegate,
+  # so every TextField crashed at build ("No MaterialLocalizations
+  # found") — the login form rendered as a gray ErrorWidget box and
+  # sign-in was impossible on real devices since v0.1.0.
+  flutter_localizations:
+    sdk: flutter
+
+  # --- Backend (database + auth + realtime + storage) ---
+  supabase_flutter: ^2.8.4
+
+  # --- Cryptography (X25519 / Ed25519 / HKDF / AES-256-GCM) ---
+  cryptography: ^2.9.0
+
+  # --- Secure on-device key storage ---
+  flutter_secure_storage: ^9.2.4
+
+  # --- Local database (offline first) ---
+  sqflite: ^2.4.1
+  path: ^1.9.0
+  path_provider: ^2.1.5
+
+  # --- State management ---
+  provider: ^6.1.2
+
+  # --- Connectivity awareness ---
+  connectivity_plus: ^6.1.2
+
+  # --- Media picking & recording ---
+  image_picker: ^1.1.2
+  record: ^6.2.1
+  file_picker: ^8.1.7
+
+  # --- Media playback ---
+  just_audio: ^0.9.43
+  video_player: ^2.9.2
+  local_auth: ^2.3.0
+
+  # --- Image thumbnails (pure Dart) ---
+  image: ^4.5.2
+
+  # --- Notifications ---
+  flutter_local_notifications: ^18.0.1
+  permission_handler: ^11.3.1
+
+  # --- Firebase (نفس مشروع drs-nexora القائم من تكامل FCM — لا تكرار) ---
+  # firebase_core + firebase_messaging: دفع النظام (كان قائماً).
+  # firebase_auth + cloud_firestore: طبقة هوية Violet Chat (v0.1.0) —
+  # المصادقة بالبريد/كلمة المرور + ملف المستخدم users/{uid}.
+  # تفعيل الخدمتين يتطلب خطوات Console موثقة في docs/FIREBASE_SETUP.md؛
+  # وقت التشغيل يكتشف التوفر ويسقط بأمان إلى تدفق المصادقة القائم.
+  firebase_core: ^3.10.0
+  firebase_auth: ^5.4.0
+  cloud_firestore: ^5.6.0
+  firebase_messaging: ^15.1.6
+
+  # --- Calls (WebRTC) ---
+  flutter_webrtc: ^0.14.0
+
+  # --- Utilities ---
+  uuid: ^4.5.1
+  intl: ^0.20.2
+  share_plus: ^10.1.3
+  device_info_plus: ^11.3.0
+  app_links: ^6.3.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+
+flutter:
+  uses-material-design: true

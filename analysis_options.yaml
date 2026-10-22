@@ -1,0 +1,18 @@
+include: package:flutter_lints/flutter.yaml
+
+analyzer:
+  errors:
+    unused_import: error
+    dead_code: error
+    invalid_use_of_protected_member: error
+
+linter:
+  rules:
+    prefer_const_constructors: true
+    prefer_const_declarations: true
+    prefer_final_locals: true
+    avoid_print: true
+    unnecessary_string_interpolations: true
+    unnecessary_brace_in_string_interps: true
+    use_key_in_widget_constructors: true
+    prefer_single_quotes: false

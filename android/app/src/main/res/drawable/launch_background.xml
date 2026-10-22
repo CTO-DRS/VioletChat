@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Splash: solid brand dark purple + centered brand mark.
+     The mark renders immediately on cold start, before Flutter's first
+     frame (v0.1.0 — matches the new adaptive launcher icon). -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:drawable="@android:color/black" />
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="#140B2E" />
+        </shape>
+    </item>
+    <item android:drawable="@drawable/splash_logo" android:gravity="center" />
+</layer-list>

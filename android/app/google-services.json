@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "1045783358683",
+    "project_id": "drs-nexora",
+    "storage_bucket": "drs-nexora.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1045783358683:android:601138037a0cf8f65570fe",
+        "android_client_info": {
+          "package_name": "com.drs.nexora"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDWrpC8mI2zBcbA_suxR3qb6GqUYhENbJc"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
