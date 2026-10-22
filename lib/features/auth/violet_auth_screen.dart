@@ -52,13 +52,13 @@ class _VioletGlassScaffold extends StatelessWidget {
         ),
         child: Stack(
           children: [
-            // هالات بنفسجية ناعمة — عمق بلا تشتيت.
-            const Positioned(
+            // هالات بنفسجية ناعمة — عمق بلا تشتيت (RTL-aware).
+            const PositionedDirectional(
               top: -120,
               end: -80,
               child: _GlowOrb(size: 280, color: Color(0xFF7C3AED)),
             ),
-            const Positioned(
+            const PositionedDirectional(
               bottom: -140,
               start: -100,
               child: _GlowOrb(size: 320, color: Color(0xFF4C1D95)),

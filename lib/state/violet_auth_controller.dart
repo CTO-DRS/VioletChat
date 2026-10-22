@@ -264,7 +264,7 @@ class VioletAuthController extends ChangeNotifier {
   // ----------------------------------------------------------------
   // أدوات الحالة
   // ----------------------------------------------------------------
-  bool _running = false;
+  final bool _running = false; // حارس إضافي ضد التزامن (متسق مع busy)
 
   Future<bool> _run(Future<bool> Function() body) async {
     if (_running || _busy) return false; // منع الإرسال المزدوج
