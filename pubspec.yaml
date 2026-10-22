@@ -2,11 +2,10 @@ name: violet_chat
 description: "Violet Chat — تطبيق مراسلة Android بهوية بنفسجية، مراسلة مشفرة طرف-لطرف مع Firebase Authentication وCloud Firestore"
 publish_to: 'none'
 
-# v0.1.0 — الإصدار الأولي بهوية Violet Chat.
-# versionCode 7 (لا 1): سجل المشروع (الإصدارات المنشورة سابقاً باسم
-# DRS NEXORA بنفس applicationId) وصل إلى 6 — code أقل سيرفض أندرويد
-# تثبيته كتحديث فوق النسخ المثبتة.
-version: 0.1.0+7
+# v0.1.1 — إضافة تسجيل الدخول عبر Google إلى هوية Violet.
+# versionCode 8: الإصدار المنشور السابق (v0.1.0) حمل code 7 —
+# أي code أقل سيرفض أندرويد تثبيته كتحديث.
+version: 0.1.1+8
 
 environment:
   sdk: '>=3.5.0 <4.0.0'
@@ -70,6 +69,12 @@ dependencies:
   firebase_auth: ^5.4.0
   cloud_firestore: ^5.6.0
   firebase_messaging: ^15.1.6
+
+  # --- Google Sign-In (v0.1.1) ---
+  # زر «المتابعة عبر Google» على شاشة الهوية — الحصول على بيانات
+  # اعتماد Google ثم تمريرها إلى firebase_auth (signInWithCredential).
+  # 6.x: واجهة مستقرة معروفة (account.authentication → idToken).
+  google_sign_in: ^6.2.1
 
   # --- Calls (WebRTC) ---
   flutter_webrtc: ^0.14.0

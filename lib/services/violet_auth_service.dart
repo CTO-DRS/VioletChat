@@ -1,6 +1,9 @@
+import 'dart:math';
+
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 
 import '../core/logging/app_logger.dart';
 
@@ -24,7 +27,9 @@ class VioletAuthService {
   VioletAuthService() : _auth = _resolve();
 
   /// حقن صريح للاختبارات (mock أو null لإجبار وضع legacy).
-  VioletAuthService.withAuth(FirebaseAuth? auth) : _auth = auth;
+  VioletAuthService.withAuth(FirebaseAuth? auth, {GoogleSignIn? google})
+      : _auth = auth,
+        _google = google ?? _defaultGoogle;
 
   static FirebaseAuth? _resolve() {
     try {
@@ -37,6 +42,12 @@ class VioletAuthService {
 
   /// null يعني «Firebase غير مهيأ على هذه المنصة» — وضع legacy.
   final FirebaseAuth? _auth;
+
+  /// عميل Google Sign-In (v0.1.1) — نطاق البريد والملف الأساسي فقط.
+  /// حقن للاختبارات؛ الافتراضي عميل قياسي بنطاق email/profile.
+  final GoogleSignIn _google;
+  static final GoogleSignIn _defaultGoogle =
+      GoogleSignIn(scopes: ['email', 'profile']);
 
   bool get available => _auth != null;
 
@@ -102,6 +113,70 @@ class VioletAuthService {
     await a.signOut();
   }
 
+  // ----------------------------------------------------------------
+  // تسجيل الدخول عبر Google (v0.1.1)
+  // ----------------------------------------------------------------
+
+  /// التدفق القياسي: منتقي حسابات Google → رموز ID/Access →
+  /// بيانات اعتماد Firebase → جلسة Firebase كاملة.
+  ///
+  /// - إلغاء المستخدم يرمي [VioletGoogleCanceled] (لا خطأ — صمت UI).
+  /// - فشل التهيئة (DEVELOPER_ERROR وغيره) يصل كـFirebaseAuthException
+  /// أو PlatformException ويُترجم عبر [VioletAuthErrors].
+  Future<User> signInWithGoogle() async {
+    final a = _auth;
+    if (a == null) throw const VioletUnavailableException();
+
+    final GoogleSignInAccount? googleUser;
+    try {
+      googleUser = await _google.signIn();
+    } on Exception catch (e) {
+      // بعض الأجهزة تعيد الإلغاء كاستثناء منصّي وليس null.
+      if (_isCancelError(e)) throw const VioletGoogleCanceled();
+      rethrow;
+    }
+    if (googleUser == null) throw const VioletGoogleCanceled();
+
+    final GoogleSignInAuthentication auth;
+    try {
+      auth = await googleUser.authentication;
+    } on Exception catch (e) {
+      if (_isCancelError(e)) throw const VioletGoogleCanceled();
+      rethrow;
+    }
+
+    final cred = GoogleAuthProvider.credential(
+      accessToken: auth.accessToken,
+      idToken: auth.idToken,
+    );
+    final userCred = await a.signInWithCredential(cred);
+    final user = userCred.user;
+    if (user == null) {
+      throw const VioletAuthFailure('user-null', 'تعذر تسجيل الدخول عبر Google');
+    }
+    AppLogger.i(
+        'violet-auth', 'google sign-in ok (${user.uid.substring(0, 6)}…)');
+    return user;
+  }
+
+  /// إلغاء جلسة Google على الجهاز (عند الخروج من التطبيق) — حتى لا
+  /// يعيد منتقي الحسابات الاختيار الصامت في الدخول التالي.
+  Future<void> googleSignOut() async {
+    try {
+      await _google.signOut();
+    } catch (e) {
+      AppLogger.w('violet-auth', 'google sign-out issue', e);
+    }
+  }
+
+  static bool _isCancelError(Object e) {
+    final s = e.toString().toLowerCase();
+    return s.contains('12501') ||
+        s.contains('canceled') ||
+        s.contains('cancelled') ||
+        s.contains('sign_in_canceled');
+  }
+
   /// استعادة كلمة المرور — Firebase يرسل البريد بلغته المضبوطة في
   /// Console. لا redirect مخصص: المستخدم يعود للتطبيق ويسجل دخوله.
   Future<void> sendPasswordReset(String email) async {
@@ -128,6 +203,43 @@ class VioletAuthFailure implements Exception {
 
   @override
   String toString() => 'VioletAuthFailure($code)';
+}
+
+/// المستخدم أغلق منتقي حسابات Google — ليس خطأ؛ الواجهة تتجاهله.
+class VioletGoogleCanceled implements Exception {
+  const VioletGoogleCanceled();
+
+  @override
+  String toString() => 'VioletGoogleCanceled';
+}
+
+/// ============================================================
+/// مفتاح المراسلة المولّد لحسابات Google (v0.1.1).
+/// ============================================================
+/// حساب Google بلا كلمة مرور، بينما نظام المراسلة يتطلب بريداً
+/// وكلمة مرور. الحل: توليد مفتاح عشوائي مشفراً (40 حرفاً من
+/// أبجدية آمنة) بـRandom.secure — يُستخدم مرة لإنشاء جلسة
+/// المراسلة، ويُحفظ في تخزين الجهاز المشفر (Android Keystore
+/// عبر flutter_secure_storage) ليتاح إعادة الدخول لاحقاً.
+///
+/// ليس كلمة مرور اختارها المستخدم ولا تُرسل لأي مكان غير
+/// خادم المراسلة نفسه — ولا يدخل Firestore أبداً.
+class VioletMessagingKey {
+  VioletMessagingKey._();
+
+  static const String alphabet =
+      'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
+
+  /// 40 حرفاً ≈ 235 بت عشوائية — يتجاوز قوة أي هجوم عملي.
+  static String generate([Random? rng]) {
+    final r = rng ?? Random.secure();
+    return List.generate(
+        40, (_) => alphabet[r.nextInt(alphabet.length)]).join();
+  }
+
+  /// فحص نقي: هل السلسلة بمواصفات المفتاح المولّد؟
+  static bool looksGenerated(String s) =>
+      s.length == 40 && s.split('').every(alphabet.contains);
 }
 
 /// ============================================================
@@ -231,6 +343,47 @@ class VioletAuthErrors {
     'CONFIGURATION_NOT_FOUND': (
       'خدمة الحسابات غير مهيأة على هذا المشروع — تحتاج تفعيلاً من المالك',
       'Authentication is not configured for this project yet',
+    ),
+    // --- Google Sign-In (v0.1.1) ---
+    // ApiException: 10 = DEVELOPER_ERROR — البصمة/الحزمة غير مسجلة
+    // أو مزود Google غير مفعّل على مشروع Firebase.
+    'sign_in_failed': (
+      'تسجيل الدخول عبر Google غير مفعّل على المشروع بعد — يتطلب تفعيلاً '
+          'من Firebase Console (إضافة بصمة SHA-1 ثم تمكين Google)',
+      'Google sign-in is not enabled for this project yet — requires '
+          'Firebase Console setup (SHA-1 fingerprint + enable Google)',
+    ),
+    'DEVELOPER_ERROR': (
+      'تسجيل الدخول عبر Google غير مفعّل على المشروع بعد — يتطلب تفعيلاً '
+          'من Firebase Console (إضافة بصمة SHA-1 ثم تمكين Google)',
+      'Google sign-in is not enabled for this project yet — requires '
+          'Firebase Console setup (SHA-1 fingerprint + enable Google)',
+    ),
+    '10': (
+      'تسجيل الدخول عبر Google غير مفعّل على المشروع بعد — يتطلب تفعيلاً '
+          'من Firebase Console (إضافة بصمة SHA-1 ثم تمكين Google)',
+      'Google sign-in is not enabled for this project yet — requires '
+          'Firebase Console setup (SHA-1 fingerprint + enable Google)',
+    ),
+    'network_error': (
+      'تعذر الاتصال بخدمات Google — تحقق من الإنترنت',
+      'Could not reach Google services — check your connection',
+    ),
+    '7': (
+      'تعذر الاتصال بخدمات Google — تحقق من الإنترنت',
+      'Could not reach Google services — check your connection',
+    ),
+    '8': (
+      'خطأ داخلي في خدمات Google — أعد المحاولة بعد قليل',
+      'Internal Google services error — try again shortly',
+    ),
+    '12500': (
+      'تعذر إكمال الدخول عبر Google — أعد المحاولة',
+      'Google sign-in could not complete — try again',
+    ),
+    '12502': (
+      'تعذر إكمال الدخول عبر Google — أعد المحاولة',
+      'Google sign-in could not complete — try again',
     ),
   };
 

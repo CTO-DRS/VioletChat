@@ -204,4 +204,100 @@ void main() {
       expect(a == c, isFalse);
     });
   });
+
+  // -----------------------------------------------------------------
+  // v0.1.1 — تسجيل الدخول عبر Google
+  // -----------------------------------------------------------------
+  group('VioletMessagingKey — مفتاح المراسلة المولّد لحسابات Google', () {
+    test('40 حرفاً من الأبجدية الآمنة حصراً', () {
+      final k = VioletMessagingKey.generate();
+      expect(k.length, 40);
+      expect(VioletMessagingKey.looksGenerated(k), isTrue);
+      expect(
+        k.split('').every(VioletMessagingKey.alphabet.contains),
+        isTrue,
+      );
+    });
+
+    test('توليدان متتاليان لا ينتجان نفس المفتاح (عشوائية فعلية)', () {
+      final keys = {
+        for (var i = 0; i < 20; i++) VioletMessagingKey.generate(),
+      };
+      expect(keys.length, 20, reason: 'تصادم 20 مفتاحاً مستحيل عملياً');
+    });
+
+    test('looksGenerated يرفض القصير والطويل والحرف الغريب', () {
+      expect(VioletMessagingKey.looksGenerated(''), isFalse);
+      expect(VioletMessagingKey.looksGenerated('a' * 39), isFalse);
+      expect(VioletMessagingKey.looksGenerated('a' * 41), isFalse);
+      // 0 و1 وl وo ممنوعة عمداً من الأبجدية (قابلية قراءة).
+      expect(VioletMessagingKey.looksGenerated('0' * 40), isFalse);
+      expect(VioletMessagingKey.looksGenerated('${'a' * 39}l'), isFalse);
+      expect(VioletMessagingKey.looksGenerated('${'a' * 39}o'), isFalse);
+    });
+  });
+
+  group('VioletAuthErrors — أخطاء Google Sign-In (v0.1.1)', () {
+    test('DEVELOPER_ERROR/10/sign_in_failed توضح أن التفعيل من Console', () {
+      for (final code in const ['sign_in_failed', 'DEVELOPER_ERROR', '10']) {
+        final ar = VioletAuthErrors.messageAr(
+            const VioletAuthFailure(code, ''));
+        expect(ar, contains('Google'), reason: code);
+        expect(ar, contains('Firebase'), reason: code);
+        final en = VioletAuthErrors.messageEn(
+            const VioletAuthFailure(code, ''));
+        expect(en.toLowerCase(), contains('not enabled'), reason: code);
+      }
+    });
+
+    test('أخطاء شبكة Google ترجع رسالة اتصال واضحة', () {
+      expect(
+        VioletAuthErrors.messageAr(const VioletAuthFailure('network_error', '')),
+        contains('خدمات Google'),
+      );
+      expect(
+        VioletAuthErrors.messageAr(const VioletAuthFailure('7', '')),
+        contains('خدمات Google'),
+      );
+    });
+
+    test('أكواد 12500/12502 ترجع رسالة إعادة محاولة', () {
+      expect(
+        VioletAuthErrors.messageAr(const VioletAuthFailure('12500', '')),
+        contains('أعد المحاولة'),
+      );
+      expect(
+        VioletAuthErrors.messageAr(const VioletAuthFailure('12502', '')),
+        contains('أعد المحاولة'),
+      );
+    });
+
+    test('PlatformException المغلف (sign_in_failed من المنصة) يُفهرس صح', () {
+      // المحلل النصي يلتقط الكود الأول من: PlatformException(sign_in_failed, …)
+      final e = Exception('PlatformException(sign_in_failed, '
+          'com.google.android.gms.common.ApiException: 10: DEVELOPER_ERROR)');
+      expect(VioletAuthErrors.messageAr(e), contains('Google'));
+    });
+  });
+
+  group('VioletGoogleCanceled — الإلغاء ليس خطأ', () {
+    test('toString مميز للتعرف عليه في المسارات', () {
+      expect(const VioletGoogleCanceled().toString(), 'VioletGoogleCanceled');
+    });
+  });
+
+  group('VioletAuthService — Google في وضع legacy', () {
+    final svc = VioletAuthService.withAuth(null);
+
+    test('signInWithGoogle يرمي VioletUnavailableException بلا Firebase', () {
+      expect(
+        () => svc.signInWithGoogle(),
+        throwsA(isA<VioletUnavailableException>()),
+      );
+    });
+
+    test('googleSignOut في وضع legacy لا يرمي (سقوط آمن)', () async {
+      await expectLater(svc.googleSignOut(), completes);
+    });
+  });
 }

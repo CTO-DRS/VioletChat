@@ -196,6 +196,26 @@ class _VioletAuthFormState extends State<_VioletAuthForm> {
 
   String? _validatePassword(String? v) => VioletValidators.password(v);
 
+  Future<void> _googleSignIn() async {
+    FocusScope.of(context).unfocus();
+    final ctl = context.read<VioletAuthController>();
+    final messenger = ScaffoldMessenger.of(context);
+
+    final ok = await ctl.violetGoogleSignIn();
+
+    // البوابة تنتقل تلقائياً عند اكتمال التمهيد — هنا فقط رسائل الحالة
+    // (الإلغاء صامت: لا snackbar إطلاقاً).
+    final (err, info) = ctl.consumeMessages();
+    if (err != null) {
+      messenger.showSnackBar(SnackBar(
+        content: Text(err),
+        duration: const Duration(seconds: 5),
+      ));
+    } else if (ok && info != null) {
+      messenger.showSnackBar(SnackBar(content: Text(info)));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final ctl = context.watch<VioletAuthController>();
@@ -362,6 +382,15 @@ class _VioletAuthFormState extends State<_VioletAuthForm> {
                       _VioletMode.forgot => 'إرسال رابط الاستعادة',
                     }),
             ),
+
+            // زر Google (v0.1.1) — خفي في وضع الاستعادة (لا معنى له).
+            if (_mode != _VioletMode.forgot) ...[
+              const SizedBox(height: 12),
+              _GoogleGlassButton(
+                onPressed: busy ? null : _googleSignIn,
+                busy: busy,
+              ),
+            ],
           ],
 
           const SizedBox(height: 18),
@@ -475,4 +504,254 @@ class _InfoCard extends StatelessWidget {
       ),
     );
   }
+}
+
+// -------------------------------------------------------------------
+// زر Google (v0.1.1) — أبيض زجاجي بشعار G الرسمي بأربعة ألوان.
+// الشعار مرسوم برمجياً (CustomPaint) بلا أي أصول خارجية — المسارات
+// هي المسارات الرسمية لشعار Google G على شبكة 48×48.
+// -------------------------------------------------------------------
+class _GoogleGlassButton extends StatelessWidget {
+  final VoidCallback? onPressed;
+  final bool busy;
+  const _GoogleGlassButton({required this.onPressed, required this.busy});
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 48,
+      child: ElevatedButton(
+        onPressed: onPressed,
+        style: ElevatedButton.styleFrom(
+          backgroundColor: Colors.white.withValues(alpha: 0.97),
+          foregroundColor: const Color(0xFF1F2937),
+          disabledBackgroundColor: Colors.white.withValues(alpha: 0.55),
+          elevation: 0,
+          shadowColor: Colors.transparent,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14),
+            side: BorderSide(color: Colors.white.withValues(alpha: 0.65)),
+          ),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            if (busy)
+              const SizedBox(
+                width: 19,
+                height: 19,
+                child: CircularProgressIndicator(strokeWidth: 2.2),
+              )
+            else
+              const CustomPaint(
+                size: Size(19, 19),
+                painter: _GoogleGPainter(),
+              ),
+            const SizedBox(width: 11),
+            const Text(
+              'المتابعة عبر Google',
+              style: TextStyle(
+                fontSize: 14.5,
+                fontWeight: FontWeight.w600,
+                color: Color(0xFF1F2937),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// شعار Google G بأربعة ألوان — مسارات رسمية على شبكة 48×48،
+/// مع محلل مسارات SVG محدود (M/L/H/V/C/S/Q/Z مطلق ونسبي) يغطي
+/// المسارات الأربعة دون أي حزمة خارجية.
+class _GoogleGPainter extends CustomPainter {
+  const _GoogleGPainter();
+
+  static const _blue = Color(0xFF4285F4);
+  static const _green = Color(0xFF34A853);
+  static const _yellow = Color(0xFFFBBC05);
+  static const _red = Color(0xFFEA4335);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final sx = size.width / 48.0, sy = size.height / 48.0;
+    final m = Matrix4.identity()..scale(sx, sy, 1.0);
+
+    void paintPath(String d, Color color) {
+      canvas.drawPath(
+        _parsePath(d).transform(m.storage),
+        Paint()..color = color,
+      );
+    }
+
+    // الأزرق: الذراع اليمنى للحرف G.
+    paintPath(
+      'M45.12 24.5c0-1.56-.14-3.06-.4-4.5H24v8.51h11.84c-.51 2.75-2.06 '
+      '5.08-4.39 6.64v5.52h7.11c4.16-3.83 6.56-9.47 6.56-16.17z',
+      _blue,
+    );
+    // الأخضر: الجزء السفلي.
+    paintPath(
+      'M24 46c5.94 0 10.92-1.97 14.56-5.33l-7.11-5.52c-1.97 1.32-4.49 '
+      '2.1-7.45 2.1-5.73 0-10.58-3.87-12.31-9.07H4.34v5.7C7.96 41.07 '
+      '15.4 46 24 46z',
+      _green,
+    );
+    // الأصفر: الجزء الأيسر.
+    paintPath(
+      'M11.69 28.18C11.25 26.86 11 25.45 11 24s.25-2.86.69-4.18v-5.7H4.34'
+      'C2.85 17.09 2 20.45 2 24c0 3.55.85 6.91 2.34 9.88l7.35-5.7z',
+      _yellow,
+    );
+    // الأحمر: الجزء العلوي.
+    paintPath(
+      'M24 10.75c3.23 0 6.13 1.11 8.41 3.29l6.31-6.31C34.91 4.18 29.93 2 '
+      '24 2 15.4 2 7.96 6.93 4.34 14.12l7.35 5.7c1.73-5.2 6.58-9.07 '
+      '12.31-9.07z',
+      _red,
+    );
+  }
+
+  static Path _parsePath(String d) {
+    final path = Path();
+    final cmdRe = RegExp(r'([MmLvVhHcCsSqQzZ])([^MmLvVhHcCsSqQzZ]*)');
+    final numRe = RegExp(r'-?\d*\.?\d+(?:e-?\d+)?');
+    double cx = 0, cy = 0, lastCx = 0, lastCy = 0;
+
+    for (final m in cmdRe.allMatches(d)) {
+      final cmd = m.group(1)!;
+      final nums = numRe
+          .allMatches(m.group(2)!)
+          .map((n) => double.parse(n.group(0)!))
+          .toList(growable: false);
+      var i = 0;
+      switch (cmd) {
+        case 'M':
+          if (nums.length >= 2) {
+            cx = nums[0];
+            cy = nums[1];
+            path.moveTo(cx, cy);
+            i = 2;
+          }
+          while (i + 1 < nums.length) {
+            cx = nums[i];
+            cy = nums[i + 1];
+            path.lineTo(cx, cy);
+            i += 2;
+          }
+        case 'm':
+          if (nums.length >= 2) {
+            cx += nums[0];
+            cy += nums[1];
+            path.moveTo(cx, cy);
+            i = 2;
+          }
+          while (i + 1 < nums.length) {
+            cx += nums[i];
+            cy += nums[i + 1];
+            path.lineTo(cx, cy);
+            i += 2;
+          }
+        case 'L':
+          while (i + 1 < nums.length) {
+            cx = nums[i];
+            cy = nums[i + 1];
+            path.lineTo(cx, cy);
+            i += 2;
+          }
+        case 'l':
+          while (i + 1 < nums.length) {
+            cx += nums[i];
+            cy += nums[i + 1];
+            path.lineTo(cx, cy);
+            i += 2;
+          }
+        case 'H':
+          if (nums.isNotEmpty) {
+            cx = nums[0];
+            path.lineTo(cx, cy);
+          }
+        case 'h':
+          if (nums.isNotEmpty) {
+            cx += nums[0];
+            path.lineTo(cx, cy);
+          }
+        case 'V':
+          if (nums.isNotEmpty) {
+            cy = nums[0];
+            path.lineTo(cx, cy);
+          }
+        case 'v':
+          if (nums.isNotEmpty) {
+            cy += nums[0];
+            path.lineTo(cx, cy);
+          }
+        case 'C':
+          while (i + 5 < nums.length) {
+            path.cubicTo(nums[i], nums[i + 1], nums[i + 2], nums[i + 3],
+                nums[i + 4], nums[i + 5]);
+            lastCx = nums[i + 2];
+            lastCy = nums[i + 3];
+            cx = nums[i + 4];
+            cy = nums[i + 5];
+            i += 6;
+          }
+        case 'c':
+          while (i + 5 < nums.length) {
+            path.cubicTo(cx + nums[i], cy + nums[i + 1], cx + nums[i + 2],
+                cy + nums[i + 3], cx + nums[i + 4], cy + nums[i + 5]);
+            lastCx = cx + nums[i + 2];
+            lastCy = cy + nums[i + 3];
+            cx += nums[i + 4];
+            cy += nums[i + 5];
+            i += 6;
+          }
+        case 'S':
+          while (i + 3 < nums.length) {
+            final x2 = nums[i], y2 = nums[i + 1];
+            final x = nums[i + 2], y = nums[i + 3];
+            path.cubicTo(2 * cx - lastCx, 2 * cy - lastCy, x2, y2, x, y);
+            lastCx = x2;
+            lastCy = y2;
+            cx = x;
+            cy = y;
+            i += 4;
+          }
+        case 's':
+          while (i + 3 < nums.length) {
+            final x2 = cx + nums[i], y2 = cy + nums[i + 1];
+            final x = cx + nums[i + 2], y = cy + nums[i + 3];
+            path.cubicTo(2 * cx - lastCx, 2 * cy - lastCy, x2, y2, x, y);
+            lastCx = x2;
+            lastCy = y2;
+            cx = x;
+            cy = y;
+            i += 4;
+          }
+        case 'Q':
+          if (i + 3 < nums.length) {
+            path.quadraticBezierTo(
+                nums[i], nums[i + 1], nums[i + 2], nums[i + 3]);
+            cx = nums[i + 2];
+            cy = nums[i + 3];
+          }
+        case 'q':
+          if (i + 3 < nums.length) {
+            path.quadraticBezierTo(cx + nums[i], cy + nums[i + 1],
+                cx + nums[i + 2], cy + nums[i + 3]);
+            cx += nums[i + 2];
+            cy += nums[i + 3];
+          }
+        case 'Z':
+        case 'z':
+          path.close();
+      }
+    }
+    return path;
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }

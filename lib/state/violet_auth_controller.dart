@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import '../core/logging/app_logger.dart';
 import '../core/config/app_config.dart';
@@ -43,6 +44,13 @@ class VioletAuthController extends ChangeNotifier {
 
   final VioletAuthService violet;
   final VioletProfileService violetProfiles;
+
+  /// تخزين مشفر بجهاز (Android Keystore) — يُحفظ فيه مفتاح المراسلة
+  /// المولّد لحسابات Google فقط (ليس كلمات مرور المستخدمين).
+  static const _secure = FlutterSecureStorage(
+    aOptions: AndroidOptions(encryptedSharedPreferences: true),
+  );
+  static String _messagingKeyStorageId(String uid) => 'violet_msg_key_$uid';
 
   bool _busy = false;
   bool get busy => _busy;
@@ -164,6 +172,106 @@ class VioletAuthController extends ChangeNotifier {
   }
 
   // ----------------------------------------------------------------
+  // تسجيل الدخول عبر Google (v0.1.1)
+  // ----------------------------------------------------------------
+
+  /// التدفق الكامل لزر «المتابعة عبر Google»:
+  /// 1) اعتماد Google → Firebase (الخدمة)
+  /// 2) ملف Firestore (معاملة آمنة بلا كتابة فوق موجود)
+  /// 3) جسر المراسلة: حساب Google بلا كلمة مرور، بينما نظام
+  ///    المراسلة يتطلب بريداً وكلمة مرور → مفتاح عشوائي مشفر
+  ///    يُولّد مرة (وُيُخزن مشفراً على الجهاز) وينشئ جلسة المراسلة.
+  Future<bool> violetGoogleSignIn() {
+    return _run(() async {
+      // 1) Firebase عبر بيانات اعتماد Google.
+      final user = await violet.signInWithGoogle();
+
+      final email = (user.email ?? '').trim();
+      if (email.isEmpty) {
+        // حساب Google بلا بريد ظاهر (نادر جداً) — نخرج بوضوح.
+        await violet.signOut();
+        return _fail('تعذر معرفة بريد حساب Google — جرّب الدخول بالبريد');
+      }
+
+      // 2) ملف Firestore — الاسم من حساب Google (موجود دائماً تقريباً).
+      await violetProfiles.ensureProfile(
+        uid: user.uid,
+        displayName: (user.displayName ?? email.split('@').first).trim(),
+        email: email,
+        photoUrl: user.photoURL,
+      );
+
+      // 3) جسر المراسلة.
+      final bridge = await _bridgeMessagingGoogle(user);
+      if (bridge != null) return _fail(bridge);
+
+      _infoAr = 'مرحباً بك في Violet Chat';
+      return true;
+    });
+  }
+
+  /// جسر المراسلة لحسابات Google:
+  /// أ) مفتاح مخزن مشفراً من دخول سابق → دخول مباشر.
+  /// ب) لا مفتاح → توليد مفتاح جديد + إنشاء حساب مراسلة
+  ///    (autoconfirm على الخادم يمنح جلسة فورية) ثم تخزينه مشفراً.
+  /// ج) البريد مسجل مسبقاً على المراسلة بكلمة مرور أخرى (مثلاً
+  ///    مستخدم DRS NEXORA القديم) → رسالة توجيه واضحة.
+  Future<String?> _bridgeMessagingGoogle(User user) async {
+    final email = (user.email ?? '').trim();
+    if (email.isEmpty) return 'تعذر معرفة بريد حساب Google';
+    final storageId = _messagingKeyStorageId(user.uid);
+
+    // أ) مفتاح سابق مخزن على هذا الجهاز؟
+    try {
+      final stored = await _secure.read(key: storageId);
+      if (stored != null && stored.length >= 8) {
+        if (services.auth.isSignedIn &&
+            services.auth.email?.toLowerCase() != email.toLowerCase()) {
+          await services.onSignedOut();
+          await services.auth.signOut();
+        }
+        if (!services.auth.isSignedIn) {
+          await services.auth.signIn(email, stored);
+        }
+        await auth.bootstrap();
+        return null;
+      }
+    } catch (e) {
+      AppLogger.w('violet-auth', 'stored messaging key failed', e);
+      // نكمل للمسار (ب) — المفتاح المخزن قد يكون قديماً.
+    }
+
+    // ب) توليد مفتاح جديد وإنشاء حساب المراسلة أول مرة.
+    final fresh = VioletMessagingKey.generate();
+    try {
+      final username = VioletValidators.deriveUsername(
+          user.displayName ?? '', email);
+      await services.auth.signUp(email, fresh, username);
+      // حفظ المفتاح فور نجاح الإنشاء (قبل فحص الجلسة) — إن لم تُمنح
+      // جلسة فورية (autoconfirm معطل) يعيد المستخدم المحاولة بعد
+      // تأكيد البريد ويدخل عبر المسار (أ) بالمفتاح المخزن.
+      await _secure.write(key: storageId, value: fresh);
+      if (auth.signedIn) {
+        await auth.bootstrap();
+        return null;
+      }
+      // autoconfirm معطل على الخادم → بلا جلسة فورية.
+      return 'تم إنشاء الحساب — أكّد بريدك الإلكتروني ثم أعد المحاولة';
+    } catch (signUpErr) {
+      final su = signUpErr.toString().toLowerCase();
+      if (su.contains('already registered') ||
+          su.contains('already been registered')) {
+        // ج) حساب مراسلة قائم ببيانات مختلفة (مستخدم سابق أو
+        //    إعادة تثبيت فقدت المفتاح المشفر) — توجيه صريح.
+        return 'هذا البريد له حساب مراسلة بكلمة مرور مختلفة — '
+            'استخدم «حساب مراسلة قائم» للدخول بالبريد وكلمة المرور، '
+            'أو استعد كلمة المرور من شاشة الدخول';
+      }
+      AppLogger.e('violet-auth', 'google messaging bridge failed', signUpErr);
+      return VioletAuthErrors.messageAr(signUpErr);
+    }
+  }
+  // ----------------------------------------------------------------
   // تسجيل الخروج من الجلستين معاً
   // ----------------------------------------------------------------
   Future<void> violetSignOut() async {
@@ -178,6 +286,10 @@ class VioletAuthController extends ChangeNotifier {
     } catch (e) {
       AppLogger.w('violet-auth', 'firebase sign-out issue', e);
     }
+    // جلسة Google على الجهاز — حتى لا يعاد اختيار الحساب صامتاً.
+    try {
+      await violet.googleSignOut();
+    } catch (_) {}
     auth.me = null;
     _errorAr = null;
     _infoAr = null;
@@ -274,6 +386,9 @@ class VioletAuthController extends ChangeNotifier {
     notifyListeners();
     try {
       return await body();
+    } on VioletGoogleCanceled {
+      // المستخدم أغلق منتقي حسابات Google — ليس خطأ؛ صمت تام.
+      return false;
     } on VioletUnavailableException {
       return _fail(
           'هوية Violet غير متاحة حالياً — استخدم حساب المراسلة القائم');

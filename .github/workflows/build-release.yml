@@ -128,7 +128,7 @@ jobs:
             dist/app-arm64-v8a-release.apk \
             dist/app-armeabi-v7a-release.apk \
             dist/SHA256SUMS.txt \
-            --title "Violet Chat ${TAG} — Initial Release" \
+            --title "Violet Chat ${TAG}" \
             --notes-file RELEASE_NOTES.md \
             --latest
 
