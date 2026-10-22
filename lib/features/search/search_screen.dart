@@ -16,7 +16,10 @@ import '../../widgets/brand.dart';
 
 /// Global search — users / local messages / my chats.
 class SearchScreen extends StatefulWidget {
-  const SearchScreen({super.key});
+  /// v0.1.6: استعلام مبدئي اختياري — يُعبّأ في الحقل ويُشغّل
+  /// البحث تلقائياً عند الفتح (مثلاً من ورقة «إضافة صديق»).
+  final String? initialQuery;
+  const SearchScreen({super.key, this.initialQuery});
 
   @override
   State<SearchScreen> createState() => _SearchScreenState();
@@ -43,7 +46,13 @@ class _SearchScreenState extends State<SearchScreen>
     super.initState();
     _services = context.read<AppServices>();
     _tab = TabController(length: 3, vsync: this);
-    _query = TextEditingController()..addListener(_onQueryChanged);
+    // النص يُضبط قبل إضافة المستمع حتى لا يلمس setState أثناء initState.
+    _query = TextEditingController(text: widget.initialQuery ?? '');
+    _query.addListener(_onQueryChanged);
+    if ((widget.initialQuery ?? '').trim().isNotEmpty) {
+      WidgetsBinding.instance
+          .addPostFrameCallback((_) => unawaited(_runSearch()));
+    }
   }
 
   @override

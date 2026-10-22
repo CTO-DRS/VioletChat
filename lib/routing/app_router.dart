@@ -67,7 +67,12 @@ class AppRouter {
         final chat = settings.arguments as Chat;
         return _detail(ChatScreen(chat: chat), settings);
       case AppRoutes.search:
-        return _detail(const SearchScreen(), settings);
+        // v0.1.6: وسيط اختياري — استعلام مبدئي (مثلاً معرّف صديق من
+        // ورقة «إضافة صديق بالمعرّف») يُعبّأ ويُشغّل البحث عند الفتح.
+        final initialQuery = settings.arguments is String
+            ? settings.arguments as String
+            : null;
+        return _detail(SearchScreen(initialQuery: initialQuery), settings);
       case AppRoutes.profile:
         return _detail(const ProfileScreen(), settings);
       case AppRoutes.createGroup:

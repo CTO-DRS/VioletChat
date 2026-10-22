@@ -5,6 +5,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import 'package:share_plus/share_plus.dart';
 
 import '../../core/config/app_config.dart';
 import '../../core/constants/app_constants.dart';
@@ -18,6 +19,7 @@ import '../../state/chats_controller.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/brand.dart';
 import '../../widgets/verified_badge.dart';
+import 'chat_query.dart';
 
 /// Home shell — v0.1.2 «Neon Nebula» redesign:
 /// bottom navigation with four tabs (الرئيسية dashboard، المحادثات،
@@ -47,6 +49,11 @@ class _ChatsScreenState extends State<ChatsScreen>
   Set<String> _online = {}; // peer ids the server lets us see online
   bool _presenceRequested = false;
 
+  // v0.1.6 «كل زر له وظيفة»: التصفية المحلية الفورية — شريط البحث
+  // يصفّي القائمة المعروضة لحظياً بدل فتح شاشة البحث الشاملة.
+  final TextEditingController _searchField = TextEditingController();
+  String _query = '';
+
   @override
   void initState() {
     super.initState();
@@ -63,6 +70,7 @@ class _ChatsScreenState extends State<ChatsScreen>
     _typingSub?.cancel();
     _typingTimer?.cancel();
     _pulse.dispose();
+    _searchField.dispose();
     super.dispose();
   }
 
@@ -437,9 +445,11 @@ class _ChatsScreenState extends State<ChatsScreen>
         return (b.lastMessageAt ?? b.createdAt)
             .compareTo(a.lastMessageAt ?? a.createdAt);
       });
-    final filtered = _filter == 0
-        ? chats
-        : chats.where((c) => _filter == 2 ? c.isGroup : !c.isGroup).toList();
+    final filtered = filterChats(
+        _filter == 0
+            ? chats
+            : chats.where((c) => _filter == 2 ? c.isGroup : !c.isGroup).toList(),
+        _query);
     final skeleton = controller.loading && chats.isEmpty;
 
     // One-shot presence query once the chats list is first populated.
@@ -454,7 +464,9 @@ class _ChatsScreenState extends State<ChatsScreen>
       bottomNavigationBar: _NexNavBar(
         current: _tab,
         onTap: (i) => setState(() => _tab = i),
-        onCompose: _openNewChat,
+        // v0.1.6: + المركزي يفتح ورقة الإنشاء (4 وظائف) بدل قفزة
+        // واحدة للبحث — كل مسار له زر وظيفته الخاصة.
+        onCompose: _openCreateSheet,
       ),
       body: IndexedStack(
         index: _tab,
@@ -497,7 +509,182 @@ class _ChatsScreenState extends State<ChatsScreen>
     );
   }
 
-  void _openNewChat() => Navigator.pushNamed(context, AppRoutes.search);
+  // ------------------------------------------------------------------
+  // v0.1.6 «كل زر له وظيفة» — كل مدخل يعمل وظيفته الخاصة:
+  //   + المركزي          → ورقة الإنشاء (4 مسارات مختلفة)
+  //   أيقونة البحث       → البحث الشامل فقط (شاشة البحث)
+  //   شريط البحث         → تصفية محلية فورية للقائمة المعروضة
+  //   «+» سطر الأصدقاء   → إضافة صديق بالمعرّف
+  //   دعوة صديق          → مشاركة نظام حقيقية بمعرّف المستخدم
+  // ------------------------------------------------------------------
+  void _openGlobalSearch() => Navigator.pushNamed(context, AppRoutes.search);
+
+  /// ورقة الإنشاء — البديل عن قفز زر + المركزي مباشرة للبحث.
+  void _openCreateSheet() {
+    HapticFeedback.selectionClick();
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetCtx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(10, 0, 10, 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: Text('إنشاء جديد',
+                    style: Theme.of(sheetCtx).textTheme.titleMedium),
+              ),
+              _CreateOption(
+                icon: Icons.chat_bubble_outline_rounded,
+                color: AppTheme.brandSecondary,
+                title: 'محادثة جديدة',
+                subtitle: 'ابحث عن مستخدم بالاسم أو المعرّف وابدأ محادثة مشفرة',
+                onTap: () {
+                  Navigator.pop(sheetCtx);
+                  _openGlobalSearch();
+                },
+              ),
+              _CreateOption(
+                icon: Icons.group_add_rounded,
+                color: const Color(0xFF0EA5E9),
+                title: 'مجموعة جديدة',
+                subtitle: 'أنشئ مجموعة مشفرة وادعُ أعضاء إليها',
+                onTap: () {
+                  Navigator.pop(sheetCtx);
+                  Navigator.pushNamed(context, AppRoutes.createGroup);
+                },
+              ),
+              _CreateOption(
+                icon: Icons.person_add_alt_1_rounded,
+                color: const Color(0xFFDB2777),
+                title: 'إضافة صديق بالمعرّف',
+                subtitle: 'أدخل معرّف صديقك للعثور عليه فوراً',
+                onTap: () {
+                  Navigator.pop(sheetCtx);
+                  _openAddFriendSheet();
+                },
+              ),
+              _CreateOption(
+                icon: Icons.ios_share_rounded,
+                color: const Color(0xFF16A34A),
+                title: 'دعوة صديق للتطبيق',
+                subtitle: 'شارك الدعوة ومعرّفك عبر أي تطبيق على جهازك',
+                onTap: () {
+                  Navigator.pop(sheetCtx);
+                  _inviteFriend();
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// ورقة إضافة صديق بالمعرّف — معرّفي للنسخ + حقل معرّف الصديق
+  /// يفتح البحث الشامل معبأً ومشغّلاً.
+  void _openAddFriendSheet() {
+    final me = context.read<AuthController>().me;
+    final handle = '@${me?.username ?? ''}';
+    final field = TextEditingController();
+    // whenComplete يضمن تحرير المتحكم حتى مع الإغلاق بالسحب/بالخلف.
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (sheetCtx) => Padding(
+        padding:
+            EdgeInsets.only(bottom: MediaQuery.of(sheetCtx).viewInsets.bottom),
+        child: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 18),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text('إضافة صديق بالمعرّف',
+                    textAlign: TextAlign.center,
+                    style: Theme.of(sheetCtx).textTheme.titleMedium),
+                const SizedBox(height: 14),
+                Container(
+                  decoration: AppTheme.card(sheetCtx),
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 14, vertical: 8),
+                  child: Row(
+                    textDirection: ui.TextDirection.rtl,
+                    children: [
+                      const Icon(Icons.badge_outlined,
+                          size: 20, color: AppTheme.brandSecondary),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text('معرّفي: $handle',
+                            style: Theme.of(sheetCtx)
+                                .textTheme
+                                .bodyMedium
+                                ?.copyWith(fontWeight: FontWeight.w700)),
+                      ),
+                      IconButton(
+                        tooltip: 'نسخ المعرّف',
+                        icon: const Icon(Icons.copy_rounded, size: 18),
+                        onPressed: () {
+                          Clipboard.setData(ClipboardData(text: handle));
+                          HapticFeedback.selectionClick();
+                          ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                  content:
+                                      Text('تم نسخ المعرّف $handle')));
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 14),
+                TextField(
+                  controller: field,
+                  textInputAction: TextInputAction.search,
+                  decoration: const InputDecoration(
+                    hintText: 'أدخل معرّف صديقك — مثال: ali_dev',
+                    prefixIcon:
+                        Icon(Icons.alternate_email_rounded, size: 20),
+                  ),
+                  onSubmitted: (_) =>
+                      _searchFriendHandle(sheetCtx, field),
+                ),
+                const SizedBox(height: 12),
+                FilledButton.icon(
+                  onPressed: () => _searchFriendHandle(sheetCtx, field),
+                  icon: const Icon(Icons.search_rounded, size: 18),
+                  label: const Text('ابحث الآن'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    ).whenComplete(field.dispose);
+  }
+
+  void _searchFriendHandle(
+      BuildContext sheetCtx, TextEditingController field) {
+    final q = field.text.trim();
+    Navigator.pop(sheetCtx);
+    if (q.isEmpty) return;
+    Navigator.pushNamed(context, AppRoutes.search, arguments: q);
+  }
+
+  /// v0.1.6: مشاركة نظام حقيقية عبر share_plus بدل نسخ صامت —
+  /// الدعوة تحمل معرّف المستخدم مباشرة.
+  void _inviteFriend() {
+    final me = context.read<AuthController>().me;
+    final handle = (me?.username ?? '').trim();
+    final text = handle.isEmpty
+        ? 'جرّب Violet Chat — مراسلة مشفرة طرف-لطرف 🔐'
+        : 'جرّب Violet Chat — مراسلة مشفرة طرف-لطرف 🔐\nتجدني هناك بمعرّف: @$handle';
+    HapticFeedback.selectionClick();
+    unawaited(Share.share(text));
+  }
 
   Widget _topBar({required bool dashboard}) {
     final me = context.watch<AuthController>().me;
@@ -541,8 +728,8 @@ class _ChatsScreenState extends State<ChatsScreen>
           ],
           _TopIcon(
             icon: Icons.search_rounded,
-            tooltip: 'بحث',
-            onTap: () => Navigator.pushNamed(context, AppRoutes.search),
+            tooltip: 'بحث شامل',
+            onTap: _openGlobalSearch,
           ),
         ],
       ),
@@ -580,7 +767,8 @@ class _ChatsScreenState extends State<ChatsScreen>
     int archivedCount,
     bool skeleton,
   ) {
-    final peers = _peers;
+    // v0.1.6: سطر الأصدقاء يتأثر بالتصفية المحلية أيضاً.
+    final peers = filterProfiles(_peers, _query);
     return Column(
       children: [
         _topBar(dashboard: true),
@@ -600,14 +788,16 @@ class _ChatsScreenState extends State<ChatsScreen>
                       _HeroBanner(name: me?.title ?? ''),
                       const SizedBox(height: 14),
                       _SearchPill(
-                          onTap: () =>
-                              Navigator.pushNamed(context, AppRoutes.search)),
+                        controller: _searchField,
+                        onChanged: (v) => setState(() => _query = v),
+                        onGlobalSearch: _openGlobalSearch,
+                      ),
                       if (peers.isNotEmpty) ...[
                         const SizedBox(height: 14),
                         _AvatarRail(
                           peers: peers,
                           online: _online,
-                          onAdd: _openNewChat,
+                          onAdd: _openAddFriendSheet,
                           onPeer: _openPeer,
                         ),
                       ],
@@ -620,12 +810,19 @@ class _ChatsScreenState extends State<ChatsScreen>
                       if (filtered.isEmpty)
                         Padding(
                           padding: const EdgeInsets.only(top: 44),
-                          child: controller.online
-                              ? _EmptyState(
-                                  compact: true,
-                                  onSearch: () => Navigator.pushNamed(
-                                      context, AppRoutes.search))
-                              : _ErrorState(controller: controller),
+                          child: !controller.online
+                              ? _ErrorState(controller: controller)
+                              : _query.trim().isNotEmpty
+                                  ? _LocalNoResults(
+                                      query: _query,
+                                      onGlobalSearch: _openGlobalSearch)
+                                  : _EmptyState(
+                                      compact: true,
+                                      onSearch: _openGlobalSearch,
+                                      onCreateGroup: () =>
+                                          Navigator.pushNamed(context,
+                                              AppRoutes.createGroup),
+                                    ),
                         )
                       else ...[
                         if (archivedCount > 0)
@@ -663,6 +860,8 @@ class _ChatsScreenState extends State<ChatsScreen>
     int archivedCount,
     bool skeleton,
   ) {
+    // v0.1.6: تصفية محلية فورية على قائمة المحادثات.
+    final visible = filterChats(chats, _query);
     return Column(
       children: [
         _topBar(dashboard: false),
@@ -678,7 +877,9 @@ class _ChatsScreenState extends State<ChatsScreen>
                           height:
                               MediaQuery.of(context).size.height * 0.55,
                           child: _EmptyState(
-                              onSearch: _openNewChat),
+                              onSearch: _openGlobalSearch,
+                              onCreateGroup: () => Navigator.pushNamed(
+                                  context, AppRoutes.createGroup)),
                         ),
                       ])
                     : ListView(
@@ -687,15 +888,24 @@ class _ChatsScreenState extends State<ChatsScreen>
                         children: [
                           _banners(controller),
                           _SearchPill(
-                              onTap: () => Navigator.pushNamed(
-                                  context, AppRoutes.search)),
+                            controller: _searchField,
+                            onChanged: (v) => setState(() => _query = v),
+                            onGlobalSearch: _openGlobalSearch,
+                          ),
                           const SizedBox(height: 8),
+                          if (visible.isEmpty)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 44),
+                              child: _LocalNoResults(
+                                  query: _query,
+                                  onGlobalSearch: _openGlobalSearch),
+                            ),
                           if (archivedCount > 0)
                             _ArchivedCard(
                               count: archivedCount,
                               onTap: () => _showArchivedSheet(controller),
                             ),
-                          for (final chat in chats)
+                          for (final chat in visible)
                             _ChatCard(
                               chat: chat,
                               previewText: _tilePreview(
@@ -719,7 +929,8 @@ class _ChatsScreenState extends State<ChatsScreen>
   }
 
   Widget _buildFriendsTab(ChatsController controller) {
-    final peers = _peers;
+    // v0.1.6: تصفية محلية فورية على جهات الاتصال أيضاً.
+    final peers = filterProfiles(_peers, _query);
     return Column(
       children: [
         _topBar(dashboard: false),
@@ -735,16 +946,22 @@ class _ChatsScreenState extends State<ChatsScreen>
               children: [
                 _banners(controller),
                 const SizedBox(height: 4),
+                _SearchPill(
+                  controller: _searchField,
+                  onChanged: (v) => setState(() => _query = v),
+                  onGlobalSearch: _openGlobalSearch,
+                ),
+                const SizedBox(height: 12),
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 16),
                   child: Row(
                     children: [
                       Expanded(
                         child: _QuickCard(
-                          icon: Icons.chat_bubble_outline_rounded,
-                          label: 'محادثة جديدة',
+                          icon: Icons.person_search_rounded,
+                          label: 'ابحث عن مستخدم',
                           gradient: AppTheme.brandGradient,
-                          onTap: _openNewChat,
+                          onTap: _openGlobalSearch,
                         ),
                       ),
                       const SizedBox(width: 10),
@@ -761,7 +978,7 @@ class _ChatsScreenState extends State<ChatsScreen>
                       const SizedBox(width: 10),
                       Expanded(
                         child: _QuickCard(
-                          icon: Icons.person_add_alt_1_rounded,
+                          icon: Icons.ios_share_rounded,
                           label: 'دعوة صديق',
                           gradient: const LinearGradient(
                               colors: [Color(0xFFDB2777), Color(0xFFA855F7)]),
@@ -784,8 +1001,15 @@ class _ChatsScreenState extends State<ChatsScreen>
                 if (peers.isEmpty)
                   Padding(
                     padding: const EdgeInsets.only(top: 40),
-                    child: _EmptyState(
-                        compact: true, onSearch: _openNewChat),
+                    child: _query.trim().isNotEmpty
+                        ? _LocalNoResults(
+                            query: _query,
+                            onGlobalSearch: _openGlobalSearch)
+                        : _EmptyState(
+                            compact: true,
+                            onSearch: _openGlobalSearch,
+                            onCreateGroup: () => Navigator.pushNamed(
+                                context, AppRoutes.createGroup)),
                   )
                 else
                   for (final p in peers)
@@ -815,14 +1039,6 @@ class _ChatsScreenState extends State<ChatsScreen>
         ),
       ],
     );
-  }
-
-  void _inviteFriend() {
-    Clipboard.setData(const ClipboardData(
-        text: 'جرّب Violet Chat — مراسلة مشفرة طرف-لطرف 🔐'));
-    HapticFeedback.selectionClick();
-    ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('تم نسخ نص الدعوة — شاركه مع أصدقائك')));
   }
 
   Widget _buildMoreTab(Profile? me) {
@@ -1227,12 +1443,23 @@ class _HeroBanner extends StatelessWidget {
 
 /// Rounded search pill (decorative — opens the full search screen).
 class _SearchPill extends StatelessWidget {
-  final VoidCallback onTap;
-  const _SearchPill({required this.onTap});
+  /// v0.1.6: حقل تصفية محلية حقيقي — الكتابة تُصفّي القائمة المعروضة
+  /// لحظياً. أيقونة «الشّمل» (tune) تفتح البحث الشامل، وأيقونة
+  /// المسح تفرّغ الحقل. وظيفتان متميزتان في عنصر واحد.
+  final TextEditingController controller;
+  final ValueChanged<String> onChanged;
+  final VoidCallback onGlobalSearch;
+
+  const _SearchPill({
+    required this.controller,
+    required this.onChanged,
+    required this.onGlobalSearch,
+  });
 
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final dimColor = isDark ? AppTheme.darkTextDim : AppTheme.lightTextDim;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Material(
@@ -1240,42 +1467,58 @@ class _SearchPill extends StatelessWidget {
             ? AppTheme.darkSurface.withValues(alpha: 0.9)
             : Colors.white,
         borderRadius: BorderRadius.circular(18),
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(18),
-          child: Container(
-            height: 50,
-            padding: const EdgeInsets.symmetric(horizontal: 14),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(18),
-              border: Border.all(
-                color: isDark
-                    ? AppTheme.darkBorder.withValues(alpha: 0.6)
-                    : const Color(0xFFECE6FA),
-              ),
+        child: Container(
+          height: 50,
+          padding: const EdgeInsets.symmetric(horizontal: 8),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(
+              color: isDark
+                  ? AppTheme.darkBorder.withValues(alpha: 0.6)
+                  : const Color(0xFFECE6FA),
             ),
-            child: Row(
-              textDirection: ui.TextDirection.rtl,
-              children: [
-                const Icon(Icons.search_rounded,
-                    size: 21, color: AppTheme.brandSecondary),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text('ابحث عن محادثات أو مستخدمين…',
-                      style: TextStyle(
+          ),
+          child: Row(
+            textDirection: ui.TextDirection.rtl,
+            children: [
+              const SizedBox(width: 6),
+              const Icon(Icons.search_rounded,
+                  size: 21, color: AppTheme.brandSecondary),
+              const SizedBox(width: 10),
+              Expanded(
+                child: TextField(
+                  controller: controller,
+                  onChanged: onChanged,
+                  textInputAction: TextInputAction.search,
+                  style: TextStyle(
+                    fontSize: 13.5,
+                    color: isDark ? AppTheme.darkText : AppTheme.lightText,
+                  ),
+                  decoration: InputDecoration.collapsed(
+                    hintText: 'تصفية سريعة للمحادثات هنا…',
+                    hintStyle: TextStyle(
                         fontSize: 13.5,
-                        color: isDark
-                            ? AppTheme.darkTextDim
-                            : AppTheme.lightTextDim,
-                      )),
+                        color: dimColor),
+                  ),
                 ),
-                Icon(Icons.tune_rounded,
-                    size: 19,
-                    color: isDark
-                        ? AppTheme.darkTextDim
-                        : AppTheme.lightTextDim),
-              ],
-            ),
+              ),
+              ValueListenableBuilder<TextEditingValue>(
+                valueListenable: controller,
+                builder: (_, v, __) => v.text.isEmpty
+                    ? IconButton(
+                        tooltip: 'بحث شامل — مستخدمون ورسائل',
+                        icon: Icon(Icons.tune_rounded,
+                            size: 19, color: dimColor),
+                        onPressed: onGlobalSearch,
+                      )
+                    : IconButton(
+                        tooltip: 'مسح التصفية',
+                        icon: Icon(Icons.close_rounded,
+                            size: 19, color: dimColor),
+                        onPressed: controller.clear,
+                      ),
+              ),
+            ],
           ),
         ),
       ),
@@ -2014,8 +2257,13 @@ class _SkeletonList extends StatelessWidget {
 
 class _EmptyState extends StatelessWidget {
   final VoidCallback onSearch;
+
+  /// v0.1.6: مسار ثانٍ مميز — «أنشئ مجموعة» بدل زر وحيد يقود
+  /// للبحث دائماً.
+  final VoidCallback? onCreateGroup;
   final bool compact;
-  const _EmptyState({required this.onSearch, this.compact = false});
+  const _EmptyState(
+      {required this.onSearch, this.onCreateGroup, this.compact = false});
 
   @override
   Widget build(BuildContext context) {
@@ -2038,16 +2286,24 @@ class _EmptyState extends StatelessWidget {
             style: Theme.of(context).textTheme.titleLarge),
         const SizedBox(height: 8),
         Text(
-          'ابدأ أول محادثة مشفرة — ابحث عن مستخدم بالاسم أو المعرّف',
+          'ابدأ أول محادثة مشفرة — ابحث عن مستخدم بالاسم أو المعرّف، أو أنشئ مجموعة',
           textAlign: TextAlign.center,
           style: dim,
         ),
         const SizedBox(height: 22),
         FilledButton.icon(
           onPressed: onSearch,
-          icon: const Icon(Icons.search_rounded, size: 19),
-          label: const Text('بحث عن مستخدم'),
+          icon: const Icon(Icons.person_search_rounded, size: 19),
+          label: const Text('ابدأ أول محادثة'),
         ),
+        if (onCreateGroup != null) ...[
+          const SizedBox(height: 10),
+          OutlinedButton.icon(
+            onPressed: onCreateGroup,
+            icon: const Icon(Icons.group_add_rounded, size: 19),
+            label: const Text('أنشئ مجموعة'),
+          ),
+        ],
       ],
     );
     if (compact) {
@@ -2106,6 +2362,132 @@ class _ErrorState extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// v0.1.6 — خيار في ورقة الإنشاء: أيقونة ملونة + عنوان + وصف.
+class _CreateOption extends StatelessWidget {
+  final IconData icon;
+  final Color color;
+  final String title;
+  final String subtitle;
+  final VoidCallback onTap;
+
+  const _CreateOption({
+    required this.icon,
+    required this.color,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Material(
+        color: isDark
+            ? AppTheme.darkSurface.withValues(alpha: 0.75)
+            : Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(16),
+          child: Container(
+            padding:
+                const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                color: isDark
+                    ? AppTheme.darkBorder.withValues(alpha: 0.5)
+                    : const Color(0xFFECE6FA),
+              ),
+            ),
+            child: Row(
+              textDirection: ui.TextDirection.rtl,
+              children: [
+                Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: color.withValues(alpha: 0.14),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(icon, size: 21, color: color),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(title,
+                          style: Theme.of(context)
+                              .textTheme
+                              .titleSmall
+                              ?.copyWith(fontWeight: FontWeight.w800)),
+                      const SizedBox(height: 2),
+                      Text(subtitle,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context)
+                              .textTheme
+                              .bodySmall
+                              ?.copyWith(
+                                  color: isDark
+                                      ? AppTheme.darkTextDim
+                                      : AppTheme.lightTextDim)),
+                    ],
+                  ),
+                ),
+                Icon(Icons.chevron_left_rounded,
+                    size: 20,
+                    color: isDark
+                        ? AppTheme.darkTextDim
+                        : AppTheme.lightTextDim),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// v0.1.6 — لا نتائج محلية عند التصفية: يقترح البحث الشامل
+/// (مستخدمون جدد) بدل ترك القائمة فارغة بصمت.
+class _LocalNoResults extends StatelessWidget {
+  final String query;
+  final VoidCallback onGlobalSearch;
+
+  const _LocalNoResults({required this.query, required this.onGlobalSearch});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(Icons.filter_alt_off_outlined,
+            size: 42,
+            color: Theme.of(context).textTheme.bodySmall?.color),
+        const SizedBox(height: 12),
+        Text('لا نتائج محلية عن «$query»',
+            style: Theme.of(context).textTheme.titleMedium),
+        const SizedBox(height: 6),
+        Text(
+          'جرّب البحث الشامل — سيبحث في كل مستخدمي التطبيق والرسائل',
+          textAlign: TextAlign.center,
+          style: Theme.of(context).textTheme.bodyMedium,
+        ),
+        const SizedBox(height: 16),
+        OutlinedButton.icon(
+          onPressed: onGlobalSearch,
+          icon: const Icon(Icons.travel_explore_rounded, size: 19),
+          label: const Text('بحث شامل في كل المستخدمين'),
+        ),
+      ],
     );
   }
 }
