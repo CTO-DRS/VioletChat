@@ -1,26 +1,44 @@
 {
   "project_info": {
-    "project_number": "1045783358683",
-    "project_id": "drs-nexora",
-    "storage_bucket": "drs-nexora.firebasestorage.app"
+    "project_number": "882476047601",
+    "project_id": "violetchat-cea68",
+    "storage_bucket": "violetchat-cea68.firebasestorage.app"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:1045783358683:android:601138037a0cf8f65570fe",
+        "mobilesdk_app_id": "1:882476047601:android:4079a5cbf0d288d800dd50",
         "android_client_info": {
-          "package_name": "com.drs.nexora"
+          "package_name": "com.drs.violetchat"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "882476047601-stvtg89qah34t5idi3druhirgqn583uu.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.drs.violetchat",
+            "certificate_hash": "924d6c62097ec89e997da06940fac961adeb376b"
+          }
+        },
+        {
+          "client_id": "882476047601-955d8umi5q0d7kfej8hdaurrhg4qhfmn.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
-          "current_key": "AIzaSyDWrpC8mI2zBcbA_suxR3qb6GqUYhENbJc"
+          "current_key": "AIzaSyA6JaXYtevJ6r4wGMu7owZfnGNpeE4RfWU"
         }
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "882476047601-955d8umi5q0d7kfej8hdaurrhg4qhfmn.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
         }
       }
     }

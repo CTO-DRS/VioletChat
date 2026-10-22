@@ -18,12 +18,15 @@ class AppConfig {
   static const String appName = 'Violet Chat';
   static const String appNameAr = 'فايلويت شات';
   static const String appTagline = 'مراسلة مشفرة طرف-لطرف • خاصة بك 100%';
-  // applicationId يبقى com.drs.nexora عمداً: مسجّل فعلياً في Firebase
-  // (google-services.json) ويحفظ مسار التحديث فوق الإصدارات المثبتة —
-  // قرار موثق في CHANGELOG؛ تغييره يجعل التطبيق منتجاً منفصلاً على
-  // أندرويد ويتطلب تسجيل حزمة جديدة في Firebase Console.
-  static const String appId = 'com.drs.nexora';
-  static const String appVersion = '0.1.0';
+  // v0.1.2: هوية الحزمة صارت com.drs.violetchat لمطابقة تسجيل Firebase
+  // الرسمي (مشروع violetchat-cea68 — المالك سجّل التطبيق بهذه الحزمة
+  // وببصمة SHA-1 للإنتاج). ملاحظة: هذا يجعل التثبيت منتجاً منفصلاً عن
+  // حزم com.drs.nexora القديمة (قرار موثق في CHANGELOG v0.1.2)،
+  // بينما namespace Kotlin الداخلية بقيت com.drs.nexora بلا تغيير.
+  static const String appId = 'com.drs.violetchat';
+  // v0.1.2: تُعرض في الإعدادات («الإصدار …») — كانت عالقة على 0.1.0
+  // في v0.1.1 (عيب عرض حقيقي مُصلَح الآن). تُرقّع مع pubspec.yaml.
+  static const String appVersion = '0.1.2';
 
   // ------------------------------------------------------------------
   // Backend (public values — safe for client bundles)
@@ -70,8 +73,10 @@ class AppConfig {
 
   // ------------------------------------------------------------------
   // Violet identity layer (v0.1.0) — Firebase Auth + Cloud Firestore.
-  // نفس مشروع Firebase القائم من تكامل FCM (drs-nexora) — لا تكرار.
-  // التوفر يُكتشف وقت التشغيل: عند غياب التهيئة/التسجيل في Console
+  // v0.1.2: المشروع الرسمي violetchat-cea68 (رقم 882476047601) عبر
+  // google-services.json الجديدة — عميل OAuth بنبض SHA-1 للإنتاج +
+  // عميل ويب يولّد default_web_client_id تلقائياً. التوفر يُكتشف وقت
+  // التشغيل: عند غياب التهيئة/التسجيل في Console
   // يسقط التطبيق بأمان إلى تدفق المصادقة القائم (Supabase).
   // خطوات التفعيل اليدوية: docs/FIREBASE_SETUP.md، القواعد: firestore.rules.
   // ------------------------------------------------------------------

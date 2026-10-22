@@ -38,7 +38,20 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.drs.nexora"
+        // v0.1.2 — هوية الحزمة الآن com.drs.violetchat لمطابقة تسجيل
+        // Firebase الرسمي (مشروع violetchat-cea68، مالك المشروع سجّل
+        // التطبيق بهذا الاسم وببصمة SHA-1 لمفتاح الإنتاج 924d6c62…376b
+        // وأضاف عميل OAuth من نوع 1 و3). بدون التطابق يفشل قابس
+        // google-services بـ «No matching client found» ويتعذر
+        // تسجيل الدخول عبر Google.
+        // ملاحظة صادقة: namespace يبقى com.drs.nexora (حزمة Kotlin
+        // الداخلية — لا حاجة لأي تغيير في MainActivity)، أما
+        // applicationId فهي هوية التثبيت على الجهاز — تغييرها يعني
+        // أن v0.1.2 يُثبَّت كتطبيق جديد مستقل ولا يحدّث تثبيتات
+        // com.drs.nexora القديمة (v0.1.0/v0.1.1)؛ القديم يُحذف يدوياً
+        // بعد تثبيت الجديد. بيانات المراسلة في الخادم مرتبطة بالحساب
+        // وليس بالحزمة فلا فقدان للبيانات.
+        applicationId = "com.drs.violetchat"
         // v0.1.0: 24 = الحد الأدنى الذي يفرضه محرك Flutter 3.35 نفسه
         // (embedding AAR يصرّح بـ minSdk 24، وmanifest merger يأخذ القيمة
         // القصوى مهما ضبطنا هنا — جرّبنا 23 فرُدّت إلى 24 آلياً). تثبيت

@@ -1,100 +1,81 @@
 # إعداد Firebase لتطبيق Violet Chat
 
-## الحالة الفعلية (مُتحقَّق منها بتاريخ 2026-10-22 عبر REST API)
+## الحالة الفعلية (مُحدَّثة 2026-10-22 — بعد خطوات المالك في Console)
 
-مشروع Firebase **`drs-nexora`** موجود مسبقاً (أنشئ أصلاً لتكامل دفع FCM)،
-و`google-services.json` الموجود في `android/app/` مسجّل لحزمة
-`com.drs.nexora` — نفس `applicationId` الحالي، فلا حاجة لمشروع جديد
-ولا لتسجيل حزمة جديدة.
+المالك أنشأ مشروع Firebase الرسمي **`violetchat-cea68`** (رقم
+882476047601) وسجّل تطبيق Android بحزمة **`com.drs.violetchat`** وببصمة
+SHA-1 لمفتاح الإنتاج، وزوّد الفريق بالملف المحدَّث `google-services.json`
+الذي أصبح يحوي عميلي OAuth (نوع 1 لنظام أندرويد بنبض الشهادة + نوع 3
+للويب) بعد أن كان الملف القديم (مشروع `drs-nexora` رقم 1045783358683)
+خالياً منهما تماماً.
 
-الفحص الحي أظهر:
+| المكوّن | الحالة (فحص حي 2026-10-22) |
+|---------|------------------------------|
+| المشروع + مفتاح Android | ✅ موجود (`1:882476047601:android:4079a5cb…`) |
+| **Google Sign-In** | ✅ **مفعّل ومربوط بتوقيع الإنتاج** — `certificate_hash` في الملف يطابق بصمة `nexora-release.jks` بايت-ببايت (`924d6c62…376b`، تحقق keytool محلي) وعميل الويب موجود (`default_web_client_id` يُولَّد عند البناء) |
+| **Authentication — Email/Password** | ❌ **غير مفعّل** (فحص REST حي: `OPERATION_NOT_ALLOWED` على `accounts:signUp`) |
+| **Cloud Firestore** | ✅ **مُنشأ والقواعد ترفض القراءة المجهولة** (`PERMISSION_DENIED` وليس `NOT_FOUND` — وضع أمني سليم) |
+| تطابق الحزمة | ✅ v0.1.2 يحمل `applicationId = com.drs.violetchat` لمطابقة تسجيل Firebase |
 
-| المكوّن | الحالة |
-|---------|--------|
-| المشروع + مفتاح Android | موجود (`1:1045783358683:android:60113803…`) |
-| **Authentication — Email/Password** | **غير مفعّل** (`CONFIGURATION_NOT_FOUND`) |
-| **Cloud Firestore** | **غير مُنشأ** (`NOT_FOUND: database does not exist`) |
-| Cloud Messaging (FCM) | مُهيأ ويستقبل الرموز من التطبيق |
+> **نتيجة عملية على الهاتف (v0.1.2):** زر «المتابعة عبر Google» يعمل
+> بالكامل فوراً — منتقي حسابات Google ← جلسة Firebase ← ملف Firestore ←
+> جلسة مراسلة بمفتاح مشفّر على الجهاز. أما **البريد/كلمة المرور** فكل
+> مساراته ترد خطأً مُترجَماً (عربي/إنجليزي) بلا أي انهيار حتى تُفعّل
+> الخطوة المتبقية أدناه.
 
-> التطبيق مصمم لهاتين الحالتين: قبل التفعيل يعمل بتدفق الحساب القائم
-> (Supabase)، وبعد التفعيل تُعرض هوية Violet كاملة تلقائياً — لا يلزم
-> أي إعادة بناء (الكود يكتشف التوفر عند كل إقلاع).
+### ملاحظة هوية الحزمة (مهمة — تُقرأ قبل التثبيت)
 
-## خطوات التفعيل اليدوية (مرة واحدة — من حساب مالك المشروع)
+- حتى v0.1.1 كانت حزمة التطبيق `com.drs.nexora` (وراثةً لمسار التحديث
+  من DRS NEXORA). مع v0.1.2 صارت **`com.drs.violetchat`** لأن المالك
+  سجّل هذه الحزمة تحديداً في مشروع Firebase الرسمي الجديد — وبدون
+  التطابق يفشل بناء قابس google-services برسالة
+  `No matching client found for package name`. الـnamespace الداخلية
+  (`com.drs.nexora`) بقيت كما هي فهي حزمة Kotlin لا علاقة لها بهوية
+  التثبيت.
+- **الجانب العملي على الجهاز**: v0.1.2 يُثبَّت كتطبيق جديد مستقل ولا
+  يُحدِّث تثبيت v0.1.0/v0.1.1 القديم — ثبّت الجديد ثم احذف القديم
+  يدوياً. بيانات المراسلة مرتبطة بالحساب على الخادم لا بالحزمة، فلا
+  فقدان لأي بيانات، وحساب Google نفسه يعطي نفس الملف بعد الدخول.
+- **FCM**: رموز الإشعارات النظامية صارت تُسجَّل الآن على المشروع
+  `violetchat-cea68` بدل المشروع القديم — أي service account كان
+  موجوداً على المشروع القديم لإرسال الدفعات من الخادم لم يعد ذا
+  أثر، ويُستبدل بحساب المشروع الجديد عند تفعيل الإرسال الخادمي
+  (موثق في BUILD.md).
 
-### 1) تفعيل Email/Password
-1. [console.firebase.google.com](https://console.firebase.google.com) → مشروع **drs-nexora**
-2. Build → **Authentication** → Get started
-3. تبويب Sign-in method → **Email/Password** → Enable → Save
-4. (اختياري الآن) Email enumeration protection: الإعداد الافتراضي جيد.
+## الخطوة المتبقية الوحيدة: تفعيل Email/Password (دقيقة واحدة)
 
-### 2) إنشاء Firestore
-1. Build → **Firestore Database** → Create database
-2. الموقع الأقرب (مثلاً `eur3` أوروبا — لا يمكن تغييره لاحقاً)
-3. ابدأ في **الوضع المقفل** ثم الصق قواعد الملف `firestore.rules`
-   من جذر المستودع (أو انشرها بـ `firebase deploy --only firestore:rules`
-   بعد `firebase init`).
+1. [console.firebase.google.com](https://console.firebase.google.com)
+   → مشروع **violetchat-cea68**
+2. Build → **Authentication** → تبويب **Sign-in method**
+3. **Email/Password** → Enable → Save
 
-### 3) التحقق من التفعيل (بلا هاتف)
+التحقق بعدها (بلا هاتف):
+
 ```bash
-KEY="AIzaSy…current_key من google-services.json"
+KEY="AIzaSyA6JaXYtevJ6r4wGMu7owZfnGNpeE4RfWU"  # المفتاح العلني من google-services.json
 curl -s -X POST "https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=$KEY" \
   -H "Content-Type: application/json" \
   -d '{"email":"probe-your-address@gmail.com","password":"xProbeViolet#2026","returnSecureToken":false}'
 ```
-- `200` → مفعّل (احذف الحساب التجريبي من Console → Authentication → Users)
-- `OPERATION_NOT_ALLOWED` / `CONFIGURATION_NOT_FOUND` → أعد الخطوة 1
-- Firestore: `GET https://firestore.googleapis.com/v1/projects/drs-nexora/databases/(default)/documents/users` → أي استجابة غير «does not exist» تعني أنه مُنشأ.
 
-### 4) تطبيق يفتح بعد التفعيل مباشرة
-لا شيء إضافي — أعد فتح التطبيق: شاشة Violet الزجاجية ستظهر تدفقات
-Firebase (إنشاء حساب/دخول/استعادة) والملف يُنشأ في `users/{uid}`.
+- `200` → مفعّل (احذف الحساب التجريبي من Authentication → Users)
+- `OPERATION_NOT_ALLOWED` → لم يُفعَّل بعد، أعد الخطوة 3
 
-## تفعيل زر «المتابعة عبر Google» (v0.1.1 — خطوات إلزامية)
+## قواعد Firestore (حاسمة — راجعها الآن)
 
-زر Google موجود الآن على شاشة الهوية. **قبل إتمام الخطوات أدناه سيرد
-الزر برسالة واضحة** (DEVELOPER_ERROR مُترجَم) — لأن ملف
-`google-services.json` الحالي لا يحتوي أي `oauth_client` (متحقق من
-الملف نفسه)، وبصمة توقيع APK غير مسجلة على المشروع.
+الاستجابة الحية `PERMISSION_DENIED` تعني أن القواعد الحالية ترفض
+الوصول المجهول — وضع أمني سليم. لكن التطبيق يحتاج قواعد دقيقة تسمح
+لكل مستخدم مصادَق بإنشاء/قراءة/تحديث ملفه فقط:
 
-### الخطوات (من حساب مالك المشروع — 3 دقائق)
+- من Console: **Firestore → Rules** → الصق محتوى ملف `firestore.rules`
+  من جذر المستودع → **Publish**
+- أو من الطرفية: `firebase deploy --only firestore:rules`
 
-1. **إضافة بصمة التوقيع**:
-   - افتح https://console.firebase.google.com → مشروع **drs-nexora**
-   - ⚙️ **Project settings** → **Your apps** → تطبيق Android
-     `com.drs.nexora` → **Add fingerprint**
-   - الصق بصمة **SHA-1** لتوقيع الإنتاج (مستخرجة من `nexora-release.jks` —
-     نفس التوقيع المستخدم في كل الإصدارات المنشورة):
+قبل نشر القواعد: تسجيل الدخول عبر Google سينجح، لكن إنشاء ملف
+`users/{uid}` قد يرفض إن كانت القواعد الحالية «رفضاً شاملاً» —
+انشر قواعد المستودع مبكراً حتى يعمل الملف الشخصي كاملاً.
 
-     ```
-     92:4D:6C:62:09:7E:C8:9E:99:7D:A0:69:40:FA:C9:61:AD:EB:37:6B
-     ```
-
-   - وأضف أيضاً بصمة **SHA-256** (تُستخدم لاحقاً لـApp Check):
-
-     ```
-     AE:74:AD:D0:9A:58:F8:06:3A:B4:5E:18:C1:B9:9E:9E:13:52:AC:F2:F4:6A:F6:77:89:D7:4F:09:7E:44:FA:6B
-     ```
-
-2. **تمكين مزوّد Google**:
-   - **Authentication** → **Sign-in method** → **Add new provider**
-   - اختر **Google** → اضغط **Enable** → اختر بريد الدعم (project
-     support email) → **Save**
-
-3. **إعادة تنزيل google-services.json** (خطوة حاسمة — لا تُتخطَّ):
-   - بعد إضافة البصمة، من Project settings → Your apps → Android →
-     **Download google-services.json** (سيحوي الآن `oauth_client`
-     بحزمة `com.drs.nexora`)
-   - استبدل به الملف `android/app/google-services.json` في المستودع
-     (أو أرسله لصاحب الوصول ليبني الإصدار القادم) — **بدون هذه الخطوة
-     يبقى الزر يرد برسالة «غير مفعّل» لأن المورد `default_web_client_id`
-     يُولَّد عند البناء من هذا الملف**
-
-4. **البناء**: أي إصدار قادم (v0.1.2 فأعلى) يُبنى بعد استبدال الملف —
-   الزر يعمل بعدها مباشرة: منتقي حسابات Google → جلسة Firebase →
-   ملف Firestore → جلسة مراسلة بمفتاح مشفر على الجهاز.
-
-### كيف يعمل التدفق داخلياً (للاطلاع)
+## كيف يعمل تدفق Google داخلياً (للاطلاع)
 
 - الحصول على رموز Google ثم `GoogleAuthProvider.credential` →
   `FirebaseAuth.signInWithCredential` (لا كلمات مرور نهائياً).
@@ -122,10 +103,11 @@ Firebase (إنشاء حساب/دخول/استعادة) والملف يُنشأ �
   التطبيق أو المستودع. مفاتيح الخادم (مثل Firebase service account
   لاستدعاء FCM من الخادم) تبقى عند المالك وحده (موثق في BUILD.md).
 
-## حدود v0.1.0 الموثقة بصدق
+## حدود موثقة بصدق
 
 - استعادة كلمة المرور على Firebase لا تغيّر تلقائياً كلمة جلسة
   المراسلة (النظامان منفصلان): بعد الاستعادة، عند الدخول أول مرة
   سيطلب التطبيق «حساب مراسلة قائم» أو إعادة تعيين على النظام القديم
-  إن اختلفت — التحسين المؤجل: مزامنة موحدة في v0.1.1.
-- إنشاء الملف في Firestore يتطلب تفعيل الخطوة 1 و2 قبل أن ينجح فعلياً.
+  إن اختلفت — التحسين المؤجل: مزامنة موحدة في إصدار قادم.
+- إنشاء الملف في Firestore يتطلب نشر قواعد المستودع (القسم أعلاه)
+  قبل أن ينجح فعلياً إن كانت القواعد الحالية رفضاً شاملاً.
