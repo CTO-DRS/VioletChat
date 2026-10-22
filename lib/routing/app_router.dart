@@ -5,6 +5,7 @@ import '../data/models/models.dart';
 import '../features/calls/call_screen.dart';
 import '../features/calls/group_call_screen.dart';
 import '../features/chats/chats_screen.dart';
+import '../features/contacts/new_chat_picker_screen.dart';
 import '../features/groups/create_group_screen.dart';
 import '../features/groups/group_info_screen.dart';
 import '../features/messages/media_gallery_screen.dart';
@@ -21,6 +22,8 @@ class AppRoutes {
   static const String chats = '/';
   static const String chat = '/chat';
   static const String search = '/search';
+  // v0.1.7: شاشة «محادثة جديدة» — اختيار من جهات الاتصال المعروفة.
+  static const String newChat = '/contacts/new';
   static const String profile = '/profile';
   static const String createGroup = '/groups/new';
   static const String groupInfo = '/groups/info';
@@ -73,6 +76,10 @@ class AppRouter {
             ? settings.arguments as String
             : null;
         return _detail(SearchScreen(initialQuery: initialQuery), settings);
+      case AppRoutes.newChat:
+        // v0.1.7: «محادثة جديدة» وجهة مستقلة — جهات اتصالك + تصفية
+        // فورية، بلا استنساخ لشاشة البحث الشامل.
+        return _detail(const NewChatPickerScreen(), settings);
       case AppRoutes.profile:
         return _detail(const ProfileScreen(), settings);
       case AppRoutes.createGroup:

@@ -7,6 +7,7 @@
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:violet_chat/features/chats/chats_screen.dart';
+import 'package:violet_chat/features/contacts/new_chat_picker_screen.dart';
 import 'package:violet_chat/features/messages/chat_screen.dart';
 import 'package:violet_chat/features/messages/media_gallery_screen.dart';
 import 'package:violet_chat/features/messages/starred_screen.dart';
@@ -27,6 +28,7 @@ import 'package:violet_chat/theme/app_theme.dart';
 void main() {
   test('screens compile (smoke)', () {
     expect(ChatsScreen, isNotNull);
+    expect(NewChatPickerScreen, isNotNull); // v0.1.7 «محادثة جديدة»
     expect(ChatScreen, isNotNull);
     expect(MediaGalleryScreen, isNotNull);
     expect(StarredScreen, isNotNull);
@@ -41,6 +43,7 @@ void main() {
     expect(CallScreen, isNotNull);
     expect(GroupCallScreen, isNotNull);
     expect(AppRoutes.chats, isNotEmpty);
+    expect(AppRoutes.newChat, isNotEmpty); // v0.1.7 المسار الجديد
     expect(AppTheme.dark(), isNotNull);
   });
 }

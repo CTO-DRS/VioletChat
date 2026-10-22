@@ -501,7 +501,7 @@ class _ChatsScreenState extends State<ChatsScreen>
             child: SafeArea(
               top: true,
               bottom: false,
-              child: _buildMoreTab(me),
+              child: _buildMoreTab(me, controller),
             ),
           ),
         ],
@@ -510,14 +510,21 @@ class _ChatsScreenState extends State<ChatsScreen>
   }
 
   // ------------------------------------------------------------------
-  // v0.1.6 «كل زر له وظيفة» — كل مدخل يعمل وظيفته الخاصة:
-  //   + المركزي          → ورقة الإنشاء (4 مسارات مختلفة)
-  //   أيقونة البحث       → البحث الشامل فقط (شاشة البحث)
-  //   شريط البحث         → تصفية محلية فورية للقائمة المعروضة
+  // v0.1.7 «إعادة الترتيب الكامل» — وظيفة واحدة = مدخل واحد في كل شاشة:
+  //   + المركزي          → ورقة الإنشاء (4 مسارات، كل مسار وجهة مختلفة)
+  //   «محادثة جديدة»     → شاشة اختيار جهات الاتصال (جديدة v0.1.7)
+  //   أيقونة البحث       → البحث الشامل فقط — المدخل الوحيد في شاشته
+  //   شريط البحث         → تصفية محلية فورية (بلا أيقونة شمّل مكررة)
   //   «+» سطر الأصدقاء   → إضافة صديق بالمعرّف
   //   دعوة صديق          → مشاركة نظام حقيقية بمعرّف المستخدم
+  //   المحفوظة والأرشيف   → تبويب «المزيد» (بيتهما الوحيد)
   // ------------------------------------------------------------------
   void _openGlobalSearch() => Navigator.pushNamed(context, AppRoutes.search);
+
+  /// البحث الشامل معبّأ مسبقاً باستعلام التصفية المحلية الفاشلة —
+  /// وظيفة مختلفة عن أيقونة البحث العلوية (التي تفتح بحثاً فارغاً).
+  void _openGlobalSearchPrefilled(String q) =>
+      Navigator.pushNamed(context, AppRoutes.search, arguments: q);
 
   /// ورقة الإنشاء — البديل عن قفز زر + المركزي مباشرة للبحث.
   void _openCreateSheet() {
@@ -540,10 +547,10 @@ class _ChatsScreenState extends State<ChatsScreen>
                 icon: Icons.chat_bubble_outline_rounded,
                 color: AppTheme.brandSecondary,
                 title: 'محادثة جديدة',
-                subtitle: 'ابحث عن مستخدم بالاسم أو المعرّف وابدأ محادثة مشفرة',
+                subtitle: 'اختر من جهات اتصالك المعروفة وابدأ فوراً',
                 onTap: () {
                   Navigator.pop(sheetCtx);
-                  _openGlobalSearch();
+                  Navigator.pushNamed(context, AppRoutes.newChat);
                 },
               ),
               _CreateOption(
@@ -686,7 +693,7 @@ class _ChatsScreenState extends State<ChatsScreen>
     unawaited(Share.share(text));
   }
 
-  Widget _topBar({required bool dashboard}) {
+  Widget _topBar({required bool showSearch}) {
     final me = context.watch<AuthController>().me;
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
@@ -714,23 +721,15 @@ class _ChatsScreenState extends State<ChatsScreen>
           const Text(AppConfig.appName,
               style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
           const Spacer(),
-          if (dashboard) ...[
+          // v0.1.7: البحث الشامل مدخل وحيد في هذه الشاشة — حُذفت
+          // أيقتا «المحفوظة» و«مجموعة جديدة» من الأعلى (بيتهما تبويب
+          // «المزيد» وورقة الإنشاء) حتى لا تتكرر الوجهات.
+          if (showSearch)
             _TopIcon(
-              icon: Icons.bookmark_border_rounded,
-              tooltip: 'الرسائل المحفوظة',
-              onTap: () => Navigator.pushNamed(context, AppRoutes.starred),
+              icon: Icons.search_rounded,
+              tooltip: 'بحث شامل',
+              onTap: _openGlobalSearch,
             ),
-            _TopIcon(
-              icon: Icons.group_add_rounded,
-              tooltip: 'مجموعة جديدة',
-              onTap: () => Navigator.pushNamed(context, AppRoutes.createGroup),
-            ),
-          ],
-          _TopIcon(
-            icon: Icons.search_rounded,
-            tooltip: 'بحث شامل',
-            onTap: _openGlobalSearch,
-          ),
         ],
       ),
     );
@@ -771,7 +770,7 @@ class _ChatsScreenState extends State<ChatsScreen>
     final peers = filterProfiles(_peers, _query);
     return Column(
       children: [
-        _topBar(dashboard: true),
+        _topBar(showSearch: true),
         Expanded(
           child: RefreshIndicator(
             onRefresh: () async {
@@ -785,12 +784,17 @@ class _ChatsScreenState extends State<ChatsScreen>
                     padding: const EdgeInsets.only(bottom: 120),
                     children: [
                       _banners(controller),
-                      _HeroBanner(name: me?.title ?? ''),
+                      _HeroBanner(
+                        name: me?.title ?? '',
+                        // v0.1.7: البانر زر — يفتح الأمان والخصوصية
+                        // (شرح التشفير) بدل كونه زينة صامتة.
+                        onTap: () =>
+                            Navigator.pushNamed(context, AppRoutes.security),
+                      ),
                       const SizedBox(height: 14),
                       _SearchPill(
                         controller: _searchField,
                         onChanged: (v) => setState(() => _query = v),
-                        onGlobalSearch: _openGlobalSearch,
                       ),
                       if (peers.isNotEmpty) ...[
                         const SizedBox(height: 14),
@@ -815,10 +819,11 @@ class _ChatsScreenState extends State<ChatsScreen>
                               : _query.trim().isNotEmpty
                                   ? _LocalNoResults(
                                       query: _query,
-                                      onGlobalSearch: _openGlobalSearch)
+                                      onGlobalSearch: () =>
+                                          _openGlobalSearchPrefilled(_query))
                                   : _EmptyState(
                                       compact: true,
-                                      onSearch: _openGlobalSearch,
+                                      onCompose: _openCreateSheet,
                                       onCreateGroup: () =>
                                           Navigator.pushNamed(context,
                                               AppRoutes.createGroup),
@@ -864,7 +869,7 @@ class _ChatsScreenState extends State<ChatsScreen>
     final visible = filterChats(chats, _query);
     return Column(
       children: [
-        _topBar(dashboard: false),
+        _topBar(showSearch: true),
         Expanded(
           child: RefreshIndicator(
             onRefresh: controller.load,
@@ -877,7 +882,7 @@ class _ChatsScreenState extends State<ChatsScreen>
                           height:
                               MediaQuery.of(context).size.height * 0.55,
                           child: _EmptyState(
-                              onSearch: _openGlobalSearch,
+                              onCompose: _openCreateSheet,
                               onCreateGroup: () => Navigator.pushNamed(
                                   context, AppRoutes.createGroup)),
                         ),
@@ -890,7 +895,6 @@ class _ChatsScreenState extends State<ChatsScreen>
                           _SearchPill(
                             controller: _searchField,
                             onChanged: (v) => setState(() => _query = v),
-                            onGlobalSearch: _openGlobalSearch,
                           ),
                           const SizedBox(height: 8),
                           if (visible.isEmpty)
@@ -898,7 +902,8 @@ class _ChatsScreenState extends State<ChatsScreen>
                               padding: const EdgeInsets.only(top: 44),
                               child: _LocalNoResults(
                                   query: _query,
-                                  onGlobalSearch: _openGlobalSearch),
+                                  onGlobalSearch: () =>
+                                      _openGlobalSearchPrefilled(_query)),
                             ),
                           if (archivedCount > 0)
                             _ArchivedCard(
@@ -933,7 +938,7 @@ class _ChatsScreenState extends State<ChatsScreen>
     final peers = filterProfiles(_peers, _query);
     return Column(
       children: [
-        _topBar(dashboard: false),
+        _topBar(showSearch: true),
         Expanded(
           child: RefreshIndicator(
             onRefresh: () async {
@@ -949,30 +954,21 @@ class _ChatsScreenState extends State<ChatsScreen>
                 _SearchPill(
                   controller: _searchField,
                   onChanged: (v) => setState(() => _query = v),
-                  onGlobalSearch: _openGlobalSearch,
                 ),
                 const SizedBox(height: 12),
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 16),
                   child: Row(
                     children: [
+                      // v0.1.7: بطاقتان فقط، كل منهما وظيفة لا يجدها
+                      // الزر في هذه الشاشة — البحث الشامل أيقونة الشريط
+                      // العلوي وحده، والمجموعات ورقة الإنشاء وحدها.
                       Expanded(
                         child: _QuickCard(
-                          icon: Icons.person_search_rounded,
-                          label: 'ابحث عن مستخدم',
+                          icon: Icons.person_add_alt_1_rounded,
+                          label: 'إضافة صديق بالمعرّف',
                           gradient: AppTheme.brandGradient,
-                          onTap: _openGlobalSearch,
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: _QuickCard(
-                          icon: Icons.group_outlined,
-                          label: 'المجموعات',
-                          gradient: const LinearGradient(
-                              colors: [Color(0xFF0EA5E9), Color(0xFF22D3EE)]),
-                          onTap: () => Navigator.pushNamed(
-                              context, AppRoutes.createGroup),
+                          onTap: _openAddFriendSheet,
                         ),
                       ),
                       const SizedBox(width: 10),
@@ -1004,10 +1000,11 @@ class _ChatsScreenState extends State<ChatsScreen>
                     child: _query.trim().isNotEmpty
                         ? _LocalNoResults(
                             query: _query,
-                            onGlobalSearch: _openGlobalSearch)
+                            onGlobalSearch: () =>
+                                _openGlobalSearchPrefilled(_query))
                         : _EmptyState(
                             compact: true,
-                            onSearch: _openGlobalSearch,
+                            onCompose: _openAddFriendSheet,
                             onCreateGroup: () => Navigator.pushNamed(
                                 context, AppRoutes.createGroup)),
                   )
@@ -1041,12 +1038,14 @@ class _ChatsScreenState extends State<ChatsScreen>
     );
   }
 
-  Widget _buildMoreTab(Profile? me) {
+  Widget _buildMoreTab(Profile? me, ChatsController controller) {
     final isAdmin = me?.isPlatformAdmin ?? false;
     return ListView(
       padding: const EdgeInsets.only(bottom: 120),
       children: [
-        _topBar(dashboard: false),
+        // v0.1.7: بلا أيقونة بحث في أعلى هذا التبويب — بلاطة «البحث
+        // الشامل» هنا هي المدخل الوحيد، لا تكرار.
+        _topBar(showSearch: false),
         const SizedBox(height: 4),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -1107,16 +1106,19 @@ class _ChatsScreenState extends State<ChatsScreen>
           subtitle: 'ما نجمته من رسائل عبر كل المحادثات',
           onTap: () => Navigator.pushNamed(context, AppRoutes.starred),
         ),
+        // v0.1.7: بلاطة الأرشيف — كانت مخفية خلف بطاقة تظهر فقط عند
+        // وجود عناصر مؤرشفة؛ الآن مدخل دائم ببيته الواضح.
         _MoreTile(
-          icon: Icons.group_add_rounded,
-          title: 'مجموعة جديدة',
-          subtitle: 'أنشئ مجموعة مشفرة وادعُ إليها',
-          onTap: () => Navigator.pushNamed(context, AppRoutes.createGroup),
+          icon: Icons.archive_outlined,
+          title: 'الأرشيف',
+          subtitle:
+              'المحادثات المؤرشفة — ${controller.archivedChats.length} عنصر',
+          onTap: () => _showArchivedSheet(controller),
         ),
         _MoreTile(
-          icon: Icons.search_rounded,
-          title: 'البحث',
-          subtitle: 'ابحث في المحادثات والرسائل',
+          icon: Icons.travel_explore_rounded,
+          title: 'البحث الشامل',
+          subtitle: 'مستخدمون، رسائل، ومحادثاتي — في مكان واحد',
           onTap: () => Navigator.pushNamed(context, AppRoutes.search),
         ),
         _MoreTile(
@@ -1349,16 +1351,22 @@ class _NexNavBar extends StatelessWidget {
 }
 
 /// Hero welcome banner — «مرحباً بك مجدداً» + shield emblem.
+/// v0.1.7: البانر كله زر وظيفي — يفتح «الأمان والخصوصية» حيث
+/// يُشرح التشفير طرف-لطرف الذي يَعِد به البانر. لا زينة صامتة.
 class _HeroBanner extends StatelessWidget {
   final String name;
-  const _HeroBanner({required this.name});
+  final VoidCallback? onTap;
+  const _HeroBanner({required this.name, this.onTap});
 
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: Container(
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: onTap,
+        child: Container(
         padding: const EdgeInsets.fromLTRB(18, 18, 18, 18),
         decoration: BoxDecoration(
           gradient: isDark
@@ -1435,25 +1443,26 @@ class _HeroBanner extends StatelessWidget {
               ),
             ),
           ],
+          ),
         ),
       ),
     );
   }
 }
 
-/// Rounded search pill (decorative — opens the full search screen).
+/// Rounded search pill — التصفية المحلية الفورية.
 class _SearchPill extends StatelessWidget {
-  /// v0.1.6: حقل تصفية محلية حقيقي — الكتابة تُصفّي القائمة المعروضة
-  /// لحظياً. أيقونة «الشّمل» (tune) تفتح البحث الشامل، وأيقونة
-  /// المسح تفرّغ الحقل. وظيفتان متميزتان في عنصر واحد.
+  /// v0.1.7: تصفية محلية نقية — الكتابة تُصفّي القائمة المعروضة
+  /// لحظياً، وأيقونة المسح تفرّغ الحقل. حُذفت أيقونة «الشّمل»
+  /// (تفتح البحث الشامل) لأنها كانت تكرر أيقونة البحث العلوية في
+  /// الشاشة نفسها — والمدخل الوحيد للبحث الشامل هو أيقونة الشريط
+  /// العلوي.
   final TextEditingController controller;
   final ValueChanged<String> onChanged;
-  final VoidCallback onGlobalSearch;
 
   const _SearchPill({
     required this.controller,
     required this.onChanged,
-    required this.onGlobalSearch,
   });
 
   @override
@@ -1505,12 +1514,7 @@ class _SearchPill extends StatelessWidget {
               ValueListenableBuilder<TextEditingValue>(
                 valueListenable: controller,
                 builder: (_, v, __) => v.text.isEmpty
-                    ? IconButton(
-                        tooltip: 'بحث شامل — مستخدمون ورسائل',
-                        icon: Icon(Icons.tune_rounded,
-                            size: 19, color: dimColor),
-                        onPressed: onGlobalSearch,
-                      )
+                    ? const SizedBox.shrink()
                     : IconButton(
                         tooltip: 'مسح التصفية',
                         icon: Icon(Icons.close_rounded,
@@ -2256,14 +2260,15 @@ class _SkeletonList extends StatelessWidget {
 }
 
 class _EmptyState extends StatelessWidget {
-  final VoidCallback onSearch;
+  /// v0.1.7: «ابدأ أول محادثة» يفتح ورقة الإنشاء (أربع مسارات) —
+  /// وظيفة مختلفة عن أيقونة البحث العلوية، لا زرين لنفس الوجهة.
+  final VoidCallback onCompose;
 
-  /// v0.1.6: مسار ثانٍ مميز — «أنشئ مجموعة» بدل زر وحيد يقود
-  /// للبحث دائماً.
+  /// مسار ثانٍ مميز — «أنشئ مجموعة».
   final VoidCallback? onCreateGroup;
   final bool compact;
   const _EmptyState(
-      {required this.onSearch, this.onCreateGroup, this.compact = false});
+      {required this.onCompose, this.onCreateGroup, this.compact = false});
 
   @override
   Widget build(BuildContext context) {
@@ -2286,14 +2291,14 @@ class _EmptyState extends StatelessWidget {
             style: Theme.of(context).textTheme.titleLarge),
         const SizedBox(height: 8),
         Text(
-          'ابدأ أول محادثة مشفرة — ابحث عن مستخدم بالاسم أو المعرّف، أو أنشئ مجموعة',
+          'ابدأ أول محادثة مشفرة — اختر من جهات اتصالك أو أنشئ مجموعة',
           textAlign: TextAlign.center,
           style: dim,
         ),
         const SizedBox(height: 22),
         FilledButton.icon(
-          onPressed: onSearch,
-          icon: const Icon(Icons.person_search_rounded, size: 19),
+          onPressed: onCompose,
+          icon: const Icon(Icons.chat_bubble_outline_rounded, size: 19),
           label: const Text('ابدأ أول محادثة'),
         ),
         if (onCreateGroup != null) ...[
@@ -2456,8 +2461,9 @@ class _CreateOption extends StatelessWidget {
   }
 }
 
-/// v0.1.6 — لا نتائج محلية عند التصفية: يقترح البحث الشامل
-/// (مستخدمون جدد) بدل ترك القائمة فارغة بصمت.
+/// v0.1.7 — لا نتائج محلية عند التصفية: يقترح البحث الشامل
+/// معبّأ مسبقاً بنفس الاستعلام — وظيفة مختلفة عن أيقونة البحث
+/// العلوية (التي تفتح بحثاً فارغاً).
 class _LocalNoResults extends StatelessWidget {
   final String query;
   final VoidCallback onGlobalSearch;
