@@ -55,6 +55,11 @@ jobs:
       - name: Pub get
         run: flutter pub get
 
+      # التحليل الساكن قبل الاختبارات: يلتقط أخطاء الاستيراد/الأنواع
+      # قبل الوصول لمرحلة بناء APK الثقيلة (درس run 39717301418).
+      - name: Static analysis
+        run: flutter analyze --no-fatal-infos
+
       - name: Unit tests
         run: flutter test
 

@@ -8,8 +8,8 @@ import '../core/logging/app_logger.dart';
 import '../core/config/app_config.dart';
 import 'app_services.dart';
 import 'auth_controller.dart';
-import 'violet_auth_service.dart';
-import 'violet_profile_service.dart';
+import '../services/violet_auth_service.dart';
+import '../services/violet_profile_service.dart';
 
 /// ============================================================
 /// VioletAuthController — تنسيق طبقة هوية Violet Chat.
