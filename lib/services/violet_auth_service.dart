@@ -472,12 +472,24 @@ class VioletAuthErrors {
       final m = RegExp(r'([A-Za-z0-9\-_]+)\s*,').firstMatch(s);
       code = m?.group(1) ?? s;
     }
-    final pair = _map[code];
+    // v0.1.5: قابس google_sign_in يغلّف كل أعطاله PlatformException
+    // (sign_in_failed, … ApiException: N) — الرمز الأول 'sign_in_failed'
+    // يخفي الرقم الحقيقي (10 إعداد / 7 شبكة / 8 داخلي / 12500 مصادقة)،
+    // فتظهر رسالة «SHA-1» لكل الفشل بمن فيهم انقطاع الشبكة العابر
+    // (الحالة الميدانية الموثقة 2026-10-22: شبكة 18KB/s أعطت رسالة
+    // الإعداد رغم أن الإعداد سليم — محاولة سابقة عبرت Google كاملاً).
+    // رقم ApiException الحقيقي يُستخرج ويعطى الأولوية — تشخيص صادق.
+    // لاحظ: عند وجود رقم حقيقي مجهول لا نرجع لرمز القابس ('sign_in_failed')
+    // لأن رسالته الإعدادية هي نفسها مصدر التضليل — الرقم الصريح أصدق.
+    final gms =
+        RegExp(r'ApiException:\s*(\d+)').firstMatch(error.toString());
+    final pair = gms != null ? _map[gms.group(1)!] : _map[code];
     if (pair != null) return idx == 0 ? pair.$1 : pair.$2;
     // v0.1.3: بدل نص عام غامض («تحقق من البيانات والاتصال») — الرسالة
     // تحمل رمز الخطأ الفعلي، فتكشف لقطة الشاشة السبب مباشرة.
     // الدرس الميداني: رسالة عامة أخفت سبباً حقيقياً وتعطل التشخيص.
-    String diag = code;
+    // v0.1.5: مع رقم GMS مجهول تُعرض رقميته صراحةً (ApiException N).
+    String diag = gms != null ? 'ApiException ${gms.group(1)}' : code;
     if (diag.isEmpty || diag.length > 48) {
       diag = error.toString().split('\n').first;
       if (diag.length > 48) diag = diag.substring(0, 48);

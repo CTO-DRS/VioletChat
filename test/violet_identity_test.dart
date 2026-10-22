@@ -317,6 +317,51 @@ void main() {
     });
   });
 
+  group('VioletAuthErrors — رقم ApiException الحقيقي (v0.1.5)', () {
+    // v0.1.4 أخفى الرقم الحقيقي خلف 'sign_in_failed' — كل فشل Google
+    // أظهر رسالة SHA-1 حتى انقطاع الشبكة العابر (حالة ميدانية 18KB/s).
+    test('ApiException: 7 (شبكة) يعطي رسالة الاتصال لا رسالة SHA-1', () {
+      final e = Exception('PlatformException(sign_in_failed, '
+          'com.google.android.gms.common.ApiException: 7: )');
+      final ar = VioletAuthErrors.messageAr(e);
+      expect(ar, contains('خدمات Google'));
+      expect(ar, isNot(contains('SHA-1')), reason: 'رسالة الإعداد مضللة هنا');
+    });
+
+    test('ApiException: 8 (داخلي) يعطي رسالة الخطأ الداخلي', () {
+      final e = Exception('PlatformException(sign_in_failed, '
+          'com.google.android.gms.common.ApiException: 8: )');
+      expect(VioletAuthErrors.messageAr(e), contains('داخلي'));
+    });
+
+    test('ApiException: 12500 (مصادقة) يعطي رسالة إعادة المحاولة', () {
+      final e = Exception('PlatformException(sign_in_failed, '
+          'com.google.android.gms.common.ApiException: 12500: )');
+      final ar = VioletAuthErrors.messageAr(e);
+      expect(ar, contains('أعد المحاولة'));
+      expect(ar, isNot(contains('SHA-1')));
+    });
+
+    test('ApiException: 10 (إعداد) يبقى على رسالة Console الصحيحة', () {
+      final e = Exception('PlatformException(sign_in_failed, '
+          'com.google.android.gms.common.ApiException: 10: DEVELOPER_ERROR)');
+      expect(VioletAuthErrors.messageAr(e), contains('SHA-1'));
+    });
+
+    test('رقم GMS مجهول يظهر رقميته صراحةً في الرسالة', () {
+      final e = Exception('PlatformException(sign_in_failed, '
+          'com.google.android.gms.common.ApiException: 4242: )');
+      final ar = VioletAuthErrors.messageAr(e);
+      expect(ar, contains('تعذر إكمال'));
+      expect(ar, contains('ApiException 4242'));
+    });
+
+    test('sign_in_failed بلا رقم ApiException يبقى رسالة الإعداد (توافق)', () {
+      final e = Exception('PlatformException(sign_in_failed, no details)');
+      expect(VioletAuthErrors.messageAr(e), contains('SHA-1'));
+    });
+  });
+
   group('VioletAuthErrors — تشخيص صادق (v0.1.3)', () {
     test('الفشل المجهول يحمل رمز الخطأ الفعلي في الرسالة', () {
       final msg = VioletAuthErrors.messageAr(Exception('weird-crash-99'));
