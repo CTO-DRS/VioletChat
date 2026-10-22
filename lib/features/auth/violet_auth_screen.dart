@@ -1,3 +1,4 @@
+import 'dart:typed_data';
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
@@ -289,7 +290,7 @@ class _VioletAuthFormState extends State<_VioletAuthForm> {
           ],
 
           if (_resetSent && _mode == _VioletMode.forgot)
-            _InfoCard(
+            const _InfoCard(
               icon: Icons.mark_email_read_outlined,
               color: AppTheme.successColor,
               text: 'أُرسل الرابط إلى بريدك — افتح الرسالة ثم عد هنا '
@@ -577,11 +578,18 @@ class _GoogleGPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final sx = size.width / 48.0, sy = size.height / 48.0;
-    final m = Matrix4.identity()..scale(sx, sy, 1.0);
+    // مصفوفة قياس 4×4 (عمودية-رئيسية) مباشرة — بلا vector_math
+    // ولا أي API مهجور (درس analyze: deprecated_member_use قاتل
+    // مع --fatal-warnings في إصدارات قادمة).
+    final m = Float64List(16);
+    m[0] = sx;
+    m[5] = sy;
+    m[10] = 1.0;
+    m[15] = 1.0;
 
     void paintPath(String d, Color color) {
       canvas.drawPath(
-        _parsePath(d).transform(m.storage),
+        _parsePath(d).transform(m),
         Paint()..color = color,
       );
     }

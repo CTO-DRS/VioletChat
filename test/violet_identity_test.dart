@@ -240,12 +240,10 @@ void main() {
   group('VioletAuthErrors — أخطاء Google Sign-In (v0.1.1)', () {
     test('DEVELOPER_ERROR/10/sign_in_failed توضح أن التفعيل من Console', () {
       for (final code in const ['sign_in_failed', 'DEVELOPER_ERROR', '10']) {
-        final ar = VioletAuthErrors.messageAr(
-            const VioletAuthFailure(code, ''));
+        final ar = VioletAuthErrors.messageAr(VioletAuthFailure(code, ''));
         expect(ar, contains('Google'), reason: code);
         expect(ar, contains('Firebase'), reason: code);
-        final en = VioletAuthErrors.messageEn(
-            const VioletAuthFailure(code, ''));
+        final en = VioletAuthErrors.messageEn(VioletAuthFailure(code, ''));
         expect(en.toLowerCase(), contains('not enabled'), reason: code);
       }
     });

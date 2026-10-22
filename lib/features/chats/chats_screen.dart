@@ -860,7 +860,7 @@ class _ChatsScreenState extends State<ChatsScreen>
                           ),
                           if (me?.isVerified ?? false) ...[
                             const SizedBox(width: 4),
-                            VerifiedBadge(size: 16),
+                            const VerifiedBadge(size: 16),
                           ],
                         ],
                       ),
@@ -1388,7 +1388,7 @@ class _FilterChips extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final labels = const ['الكل', 'محادثات', 'المجموعات'];
+    final labels = ['الكل', 'محادثات', 'المجموعات'];
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Row(

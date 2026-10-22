@@ -24,7 +24,7 @@ import '../core/logging/app_logger.dart';
 class VioletAuthService {
   /// الافتراضي يكتشف تهيئة Firebase الحالية تلقائياً:
   /// تطبيق افتراضي موجود → متاح؛ غير ذلك → وضع legacy.
-  VioletAuthService() : _auth = _resolve();
+  VioletAuthService() : _auth = _resolve(), _google = _defaultGoogle;
 
   /// حقن صريح للاختبارات (mock أو null لإجبار وضع legacy).
   VioletAuthService.withAuth(FirebaseAuth? auth, {GoogleSignIn? google})
