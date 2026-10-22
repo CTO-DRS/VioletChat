@@ -444,6 +444,28 @@ class VioletAuthErrors {
           ? 'هوية Violet غير متاحة على هذا الجهاز — استخدم حساب المراسلة القائم'
           : 'Violet identity unavailable — use the legacy messaging account';
     }
+    // v0.1.4: أخطاء Cloud Firestore (FirebaseException الأم — وليست
+    // FirebaseAuthException). الحالة الميدانية الموثقة على جهاز المالك
+    // (v0.1.3): دخول Google ينجح كاملاً ثم تُرفض معاملة إنشاء الملف
+    // users/{uid} برمز permission-denied لأن قواعد firestore.rules
+    // غير منشورة بعد على Console (وضع الرفض الشامل الافتراضي).
+    // الرسالة هنا تسمّي الإجراء المطلوب بدل رمز مجرد.
+    if (error is FirebaseException && error is! FirebaseAuthException) {
+      if (error.code == 'permission-denied') {
+        return idx == 0
+            ? 'تم الدخول لكن قاعدة البيانات رفضت حفظ الملف — على مالك المشروع '
+                'نشر قواعد firestore.rules من Firebase Console '
+                '(Firestore ← Rules ← لصق القواعد ← Publish) ثم إعادة المحاولة'
+            : 'Signed in, but Firestore denied the profile write — the project '
+                'owner must publish firestore.rules in the Firebase Console '
+                '(Firestore → Rules → Publish), then try again';
+      }
+      if (error.code == 'unavailable' || error.code == 'deadline-exceeded') {
+        return idx == 0
+            ? 'تعذر الوصول إلى قاعدة البيانات — تحقق من الإنترنت وأعد المحاولة'
+            : 'Could not reach the database — check your connection and try again';
+      }
+    }
     if (code.isEmpty) {
       final s = error.toString();
       // بعض الأخطاء تصل مغلّفة: PlatformException(code, message…)

@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:violet_chat/services/violet_auth_service.dart';
@@ -123,6 +124,43 @@ void main() {
     test('وضع عدم التوفر يوجه للمسار القائم', () {
       final msg = VioletAuthErrors.messageAr(const VioletUnavailableException());
       expect(msg, contains('حساب المراسلة القائم'));
+    });
+
+    test('رفض Firestore (permission-denied) يعطي رسالة قابلة للتنفيذ', () {
+      // الحالة الميدانية الموثقة (v0.1.3 على جهاز المالك): دخول Google
+      // ينجح ثم معاملة users/{uid} تُرفض لأن قواعد firestore.rules
+      // غير منشورة على Console. الرسالة يجب أن تسمّي الإجراء المطلوب
+      // (نشر القواعد) بدل التشخيص العام بالرمز.
+      const e = FirebaseException(
+        plugin: 'cloud_firestore',
+        code: 'permission-denied',
+        message:
+            'The caller does not have permission to execute the specified operation.',
+      );
+      final ar = VioletAuthErrors.messageAr(e);
+      expect(ar, contains('قاعدة البيانات'));
+      expect(ar, contains('firestore.rules'));
+      expect(ar, contains('Publish'));
+      // ليست رسالة التشخيص العام (v0.1.3) ولا النص القديم الغامض.
+      expect(ar, isNot(contains('رمز:')));
+      expect(ar, isNot(contains('تحقق من البيانات والاتصال')));
+      expect(VioletAuthErrors.messageEn(e), contains('firestore.rules'));
+    });
+
+    test('انقطاع Firestore (unavailable) يرجع رسالة شبكة واضحة', () {
+      const e = FirebaseException(
+          plugin: 'cloud_firestore', code: 'unavailable');
+      expect(VioletAuthErrors.messageAr(e), contains('تحقق من الإنترنت'));
+      const t = FirebaseException(
+          plugin: 'cloud_firestore', code: 'deadline-exceeded');
+      expect(VioletAuthErrors.messageAr(t), contains('تحقق من الإنترنت'));
+    });
+
+    test('FirebaseException أخرى تظل تمر عبر التشخيص العام الصادق', () {
+      const e = FirebaseException(
+          plugin: 'cloud_firestore', code: 'some-future-code');
+      final ar = VioletAuthErrors.messageAr(e);
+      expect(ar, contains('رمز:'));
     });
   });
 
