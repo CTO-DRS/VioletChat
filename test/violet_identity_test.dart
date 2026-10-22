@@ -60,9 +60,15 @@ void main() {
       expect(RegExp(r'^[a-z0-9_]{3,20}$').hasMatch(u), isTrue);
     });
 
-    test('يقتطع الأسماء اللاتينية الطويلة', () {
-      final u = VioletValidators.deriveUsername('AlexanderHamilton', 'x@y.co');
-      expect(u, 'alexanderhamilton'.substring(0, 20));
+    test('يقتطع الأسماء اللاتينية الطويلة (>20) ولا يمسّ الأقصر', () {
+      // 17 حرفاً — أقل من الحد: تعاد كاملة (لا substring بحد زائد).
+      expect(VioletValidators.deriveUsername('AlexanderHamilton', 'x@y.co'),
+          'alexanderhamilton');
+      // 25 حرفاً — يُقتطع فعلياً إلى 20.
+      final long = VioletValidators.deriveUsername(
+          'AlexanderHamiltonTheThird', 'x@y.co');
+      expect(long.length, 20);
+      expect(long, 'alexanderhamiltonthe');
     });
   });
 
