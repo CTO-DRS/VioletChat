@@ -278,6 +278,40 @@ void main() {
     });
   });
 
+  group('VioletAuthErrors — تشخيص صادق (v0.1.3)', () {
+    test('الفشل المجهول يحمل رمز الخطأ الفعلي في الرسالة', () {
+      final msg = VioletAuthErrors.messageAr(Exception('weird-crash-99'));
+      expect(msg, contains('تعذر إكمال'));
+      expect(msg, contains('weird-crash-99'),
+          reason: 'الرمز التشخيصي يظهر في الرسالة — لقطة شاشة تكفي للتشخيص');
+    });
+
+    test('الرسالة التشخيصية مقصوصة بأمان عند النصوص الطويلة', () {
+      final long = Exception('a' * 200);
+      final msg = VioletAuthErrors.messageAr(long);
+      expect(msg.length, lessThan(200));
+      expect(msg, contains('تعذر إكمال'));
+    });
+
+    test('أكواد v0.1.3 الجديدة مُعرَّفة (خدمات Google/اعتماديات)', () {
+      expect(
+        VioletAuthErrors.messageAr(
+            const VioletAuthFailure('api_not_available', '')),
+        contains('خدمات Google'),
+      );
+      expect(
+        VioletAuthErrors.messageAr(
+            const VioletAuthFailure('invalid-credential', '')),
+        contains('أعد المحاولة'),
+      );
+      expect(
+        VioletAuthErrors.messageAr(
+            const VioletAuthFailure('google-no-id-token', '')),
+        contains('Google'),
+      );
+    });
+  });
+
   group('VioletGoogleCanceled — الإلغاء ليس خطأ', () {
     test('toString مميز للتعرف عليه في المسارات', () {
       expect(const VioletGoogleCanceled().toString(), 'VioletGoogleCanceled');

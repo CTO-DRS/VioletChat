@@ -46,8 +46,16 @@ class VioletAuthService {
   /// عميل Google Sign-In (v0.1.1) — نطاق البريد والملف الأساسي فقط.
   /// حقن للاختبارات؛ الافتراضي عميل قياسي بنطاق email/profile.
   final GoogleSignIn _google;
-  static final GoogleSignIn _defaultGoogle =
-      GoogleSignIn(scopes: ['email', 'profile']);
+  static final GoogleSignIn _defaultGoogle = GoogleSignIn(
+    scopes: ['email', 'profile'],
+    // v0.1.3: تمرير عميل الويب صراحةً (نفس القيمة في مورد
+    // default_web_client_id الذي يولّده قابس google-services من عميل
+    // النوع 3) — يزيل أي اعتماد على قراءة المورد من الجهاز ويضمن
+    // حضور idToken في كل الأحوال. المعرف عميل علني بطبيعته
+    // (مضمن في كل APK منشور أصلاً — ليس سراً).
+    serverClientId:
+        '882476047601-955d8umi5q0d7kfej8hdaurrhg4qhfmn.apps.googleusercontent.com',
+  );
 
   bool get available => _auth != null;
 
@@ -143,6 +151,13 @@ class VioletAuthService {
     } on Exception catch (e) {
       if (_isCancelError(e)) throw const VioletGoogleCanceled();
       rethrow;
+    }
+
+    // v0.1.3: حارس صريح — بلا idToken يفشل تبادل Firebase لاحقاً
+    // برسالة غامضة (invalid-credential)؛ نكشف السبب هنا مباشرةً.
+    if (auth.idToken == null || auth.idToken!.isEmpty) {
+      throw const VioletAuthFailure('google-no-id-token',
+          'تعذر الحصول على رمز الدخول من Google — أعد المحاولة');
     }
 
     final cred = GoogleAuthProvider.credential(
@@ -385,6 +400,35 @@ class VioletAuthErrors {
       'تعذر إكمال الدخول عبر Google — أعد المحاولة',
       'Google sign-in could not complete — try again',
     ),
+    // --- v0.1.3: أكواد إضافية ظهرت ميدانياً ---
+    'invalid-credential': (
+      'بيانات الدخول غير صالحة أو منتهية — أعد المحاولة',
+      'Invalid or expired credentials — try again',
+    ),
+    'user-disabled': (
+      'هذا الحساب معطّل',
+      'This account has been disabled',
+    ),
+    'api_not_available': (
+      'خدمات Google غير متاحة على هذا الجهاز — ثبّت أو حدّث خدمات Google Play ثم أعد المحاولة',
+      'Google Play services unavailable on this device — install or update it and try again',
+    ),
+    'api-not-available': (
+      'خدمات Google غير متاحة على هذا الجهاز — ثبّت أو حدّث خدمات Google Play ثم أعد المحاولة',
+      'Google Play services unavailable on this device — install or update it and try again',
+    ),
+    'google_api_connection_failed': (
+      'تعذر الاتصال بخدمات Google — تحقق من الإنترنت',
+      'Could not reach Google services — check your connection',
+    ),
+    'google-no-id-token': (
+      'تعذر الحصول على رمز الدخول من Google — أعد المحاولة',
+      'Could not obtain the Google sign-in token — try again',
+    ),
+    'internal-error': (
+      'خطأ داخلي في الخدمة — أعد المحاولة بعد قليل',
+      'Internal server error — try again shortly',
+    ),
   };
 
   /// رسالة عربية (المسار الأساسي — التطبيق عربي أولاً).
@@ -414,9 +458,17 @@ class VioletAuthErrors {
     }
     final pair = _map[code];
     if (pair != null) return idx == 0 ? pair.$1 : pair.$2;
+    // v0.1.3: بدل نص عام غامض («تحقق من البيانات والاتصال») — الرسالة
+    // تحمل رمز الخطأ الفعلي، فتكشف لقطة الشاشة السبب مباشرة.
+    // الدرس الميداني: رسالة عامة أخفت سبباً حقيقياً وتعطل التشخيص.
+    String diag = code;
+    if (diag.isEmpty || diag.length > 48) {
+      diag = error.toString().split('\n').first;
+      if (diag.length > 48) diag = diag.substring(0, 48);
+    }
     return idx == 0
-        ? 'تعذر إكمال العملية — تحقق من البيانات والاتصال'
-        : 'Could not complete the request — check your data and connection';
+        ? 'تعذر إكمال العملية (رمز: $diag) — أعد المحاولة'
+        : 'Could not complete the request (code: $diag) — try again';
   }
 }
 

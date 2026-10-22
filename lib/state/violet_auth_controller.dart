@@ -268,6 +268,17 @@ class VioletAuthController extends ChangeNotifier {
             'أو استعد كلمة المرور من شاشة الدخول';
       }
       AppLogger.e('violet-auth', 'google messaging bridge failed', signUpErr);
+      // v0.1.3: تمييز فشل الشبكة عن بقية الأسباب — الرسالة تقول أين
+      // وقف التدفق بالضبط (دخول Google نجح وجلسة المراسلة هي التي فشلت).
+      final net = signUpErr.toString().toLowerCase();
+      if (net.contains('socketexception') ||
+          net.contains('failed host lookup') ||
+          net.contains('clientexception') ||
+          net.contains('connection') ||
+          net.contains('network')) {
+        return 'تم الدخول عبر Google لكن تعذر تجهيز جلسة المراسلة — '
+            'تحقق من الإنترنت ثم أعد المحاولة';
+      }
       return VioletAuthErrors.messageAr(signUpErr);
     }
   }

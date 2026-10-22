@@ -2,12 +2,14 @@ name: violet_chat
 description: "Violet Chat — تطبيق مراسلة Android بهوية بنفسجية، مراسلة مشفرة طرف-لطرف مع Firebase Authentication وCloud Firestore"
 publish_to: 'none'
 
-# v0.1.2 — ربط مشروع Firebase الرسمي الجديد (violetchat-cea68) وتفعيل
-# زر Google الفعلي: google-services.json أصبحت تحوي عملاء OAuth (نوع 1
-# بنبض SHA-1 للإنتاج + نوع 3 للويب) بعد أن كانت خالية تماماً، وهوية
-# الحزمة أصبحت com.drs.violetchat لمطابقة تسجيل Firebase.
-# versionCode 9: الإصدار المنشور السابق (v0.1.1) حمل code 8.
-version: 0.1.2+9
+# v0.1.3 — تشخيص صادق لفشل Google ميدانياً + تحصين التدفق:
+# 1) serverClientId صريح بدل الاعتماد على مورد الجهاز (يزيل نمط فشل كامل).
+# 2) حارس idToken صريح قبل تبادل Firebase.
+# 3) رسالة الفشل المجهول تحمل رمز الخطأ الفعلي — لقطة شاشة = تشخيص فوري
+#    (الرسالة العامة القديمة «تحقق من البيانات والاتصال» أخفت السبب).
+# 4) تمييز فشل جلسة المراسلة (بعد نجاح Google) عن فشل Google نفسه.
+# versionCode 10: الإصدار المنشور السابق (v0.1.2) حمل code 9.
+version: 0.1.3+10
 
 environment:
   sdk: '>=3.5.0 <4.0.0'
