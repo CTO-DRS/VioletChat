@@ -28,7 +28,10 @@ String normalizeAr(String s) {
       case 'آ':
         sb.write('ا');
       case 'ى':
+      case 'ی': // الياء الفارسية (U+06CC) — شائعة من كيبورد فارسية/أردية
         sb.write('ي');
+      case 'ک': // الكاف الفارسية (U+06A9)
+        sb.write('ك');
       case 'ة':
         sb.write('ه');
       default:

@@ -33,6 +33,14 @@ void main() {
       expect(normalizeAr('مُحَمَّد'), 'محمد');
       expect(normalizeAr('CTO'), 'cto');
     });
+
+    test('يوحّد الياء/الكاف الفارسية مع العربية', () {
+      // ی (U+06CC) وک (U+06A9) شائعتان من كيبورد فارسية/أردية —
+      // يجب أن تطابقا الياء/الكاف العربية.
+      expect(normalizeAr('مستشفی'), 'مستشفي'); // ی ← ي
+      expect(normalizeAr('نوک'), normalizeAr('نوك')); // ک ← ك
+      expect(normalizeAr('کتاب'), normalizeAr('كتاب'));
+    });
   });
 
   group('chatMatchesQuery — مطابقة المحادثة', () {
