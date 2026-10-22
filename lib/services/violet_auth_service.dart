@@ -401,14 +401,8 @@ class VioletAuthErrors {
       'Google sign-in could not complete — try again',
     ),
     // --- v0.1.3: أكواد إضافية ظهرت ميدانياً ---
-    'invalid-credential': (
-      'بيانات الدخول غير صالحة أو منتهية — أعد المحاولة',
-      'Invalid or expired credentials — try again',
-    ),
-    'user-disabled': (
-      'هذا الحساب معطّل',
-      'This account has been disabled',
-    ),
+    // (invalid-credential وuser-disabled مُخترَقان أصلاً في قسم
+    // البريد/كلمة المرور أعلاه — لا تكرار لهما هنا).
     'api_not_available': (
       'خدمات Google غير متاحة على هذا الجهاز — ثبّت أو حدّث خدمات Google Play ثم أعد المحاولة',
       'Google Play services unavailable on this device — install or update it and try again',

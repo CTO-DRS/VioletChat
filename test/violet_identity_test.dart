@@ -302,7 +302,7 @@ void main() {
       expect(
         VioletAuthErrors.messageAr(
             const VioletAuthFailure('invalid-credential', '')),
-        contains('أعد المحاولة'),
+        contains('غير صحيحة'),
       );
       expect(
         VioletAuthErrors.messageAr(
