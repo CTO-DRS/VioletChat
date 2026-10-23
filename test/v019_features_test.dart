@@ -23,7 +23,10 @@ void main() {
       expect(() => QrAddService.buildPayload('ab'), // أقصر من 3
           throwsArgumentError);
       expect(() => QrAddService.buildPayload(''), throwsArgumentError);
-      expect(() => QrAddService.buildPayload('a b c!'), throwsArgumentError);
+      // 'a b c!' يُطبَّع إلى 'abc' (صالح!) — المدخلات الآتية لا تنجو
+      // من التطبيع: 'a b' تبقى 'ab' (حرفان) و'x!?!' تبقى 'x'.
+      expect(() => QrAddService.buildPayload('a b'), throwsArgumentError);
+      expect(() => QrAddService.buildPayload('x!?!'), throwsArgumentError);
     });
   });
 
