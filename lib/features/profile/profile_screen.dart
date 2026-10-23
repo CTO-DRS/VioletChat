@@ -5,10 +5,13 @@ import 'package:flutter/material.dart';
 import 'package:image/image.dart' as img;
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
+import 'package:qr_flutter/qr_flutter.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../core/errors/app_exception.dart';
 import '../../data/models/models.dart';
+import '../../services/qr_add_service.dart';
 import '../../state/app_services.dart';
 import '../../state/auth_controller.dart';
 import '../../state/chats_controller.dart';
@@ -163,6 +166,77 @@ class _ProfileScreenState extends State<ProfileScreen> {
         keyboardType: TextInputType.text,
         save: (v) => _services.profiles.updateUsername(v),
       );
+
+  // ===================================================================
+  // v0.1.9 — رمز QR الشخصي + مشاركته
+  // ===================================================================
+  void _showMyQr(String username) {
+    final payload = QrAddService.buildPayload(username);
+    showDialog<void>(
+      context: context,
+      builder: (dlgCtx) => AlertDialog(
+        title: const Text('رمز الإضافة الخاص بي',
+            textAlign: TextAlign.center,
+            style: TextStyle(fontWeight: FontWeight.w800)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: QrImageView(
+                data: payload,
+                version: QrVersions.auto,
+                size: 220,
+                backgroundColor: Colors.white,
+                eyeStyle: const QrEyeStyle(
+                    eyeShape: QrEyeShape.square,
+                    color: Color(0xFF3B1E54)),
+                dataModuleStyle: const QrDataModuleStyle(
+                    dataModuleShape: QrDataModuleShape.square,
+                    color: Color(0xFF3B1E54)),
+              ),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              '@$username',
+              style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w800,
+                  color: AppTheme.brandSecondary),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'من جهاز صديق: محادثة جديدة ← إضافة بمسح رمز QR',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                  fontSize: 12,
+                  height: 1.5,
+                  color: Theme.of(dlgCtx).textTheme.bodyMedium?.color),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dlgCtx),
+            child: const Text('إغلاق'),
+          ),
+          FilledButton.icon(
+            onPressed: () {
+              Navigator.pop(dlgCtx);
+              Share.share(
+                  'أضفني على Violet Chat — رمزي: $payload');
+            },
+            icon: const Icon(Icons.share_outlined, size: 18),
+            label: const Text('مشاركة'),
+          ),
+        ],
+      ),
+    );
+  }
 
   // ===================================================================
   // Avatar (v0.1.0)
@@ -529,6 +603,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   title: 'اسم المستخدم',
                   subtitle: '@${me.username}',
                   onTap: () => _editUsername(me.username),
+                ),
+                // v0.1.9 — رمز QR الشخصي: جهاز آخر يمسحه من «محادثة جديدة»
+                // فيفتح محادثتك فوراً بلا بحث يدوي.
+                _Tile(
+                  icon: Icons.qr_code_2_rounded,
+                  title: 'رمز QR الخاص بي',
+                  subtitle: 'اعرضه لصديق ليمسحه ويضيفك فوراً',
+                  onTap: () => _showMyQr(me.username),
                 ),
                 _Tile(
                   icon: Icons.notes_outlined,

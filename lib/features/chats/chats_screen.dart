@@ -17,7 +17,9 @@ import '../../state/app_services.dart';
 import '../../state/auth_controller.dart';
 import '../../state/chats_controller.dart';
 import '../../theme/app_theme.dart';
+import '../../services/update_service.dart';
 import '../../widgets/brand.dart';
+import '../../widgets/upgrade_dialog.dart';
 import '../../widgets/verified_badge.dart';
 import 'chat_query.dart';
 
@@ -63,6 +65,17 @@ class _ChatsScreenState extends State<ChatsScreen>
       duration: const Duration(milliseconds: 1100),
     )..repeat(reverse: true);
     _typingSub = _services.realtime.typingEvents.listen(_onTypingEvent);
+    // v0.1.9 — فحص تحديث صامت عند بدء الجلسة (مرة واحدة لكل إطلاق،
+    // بصمت تام عند أي فشل) — يعرض حوار الترقية فقط عند وجود أحدث.
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      // مهلة قصيرة كي لا ينافس حوار الترقية أي واجهة إقلاع.
+      await Future<void>.delayed(const Duration(seconds: 2));
+      if (!mounted) return;
+      final info = await UpdateService.silentCheck();
+      if (info != null && info.isUpgradeAvailable && mounted) {
+        showUpgradeDialog(context, info);
+      }
+    });
   }
 
   @override

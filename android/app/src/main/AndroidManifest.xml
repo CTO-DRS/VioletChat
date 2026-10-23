@@ -1,5 +1,15 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!-- v0.1.9 — url_launcher: Android 11+ requires package visibility
+         declaration before canLaunchUrl/launchUrl on https links
+         (صفحة الإصدار عند اكتشاف تحديث). -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="https" />
+        </intent>
+    </queries>
+
     <!-- Networking -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />

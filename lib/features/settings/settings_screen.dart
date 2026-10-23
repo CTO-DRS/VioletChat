@@ -11,11 +11,13 @@ import '../../data/models/models.dart';
 import '../../features/admin/admin_panel_screen.dart';
 import '../../routing/app_router.dart';
 import '../../services/device_security_service.dart';
+import '../../services/update_service.dart';
 import '../../state/app_services.dart';
 import '../../state/auth_controller.dart';
 import '../../state/settings_controller.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/brand.dart';
+import '../../widgets/upgrade_dialog.dart';
 import '../../widgets/verified_badge.dart';
 
 /// الإعدادات: الملف الشخصي، المظهر، الإشعارات، الخصوصية، الأمان،
@@ -29,6 +31,9 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   bool _exporting = false;
+
+  /// v0.1.9 — حالة الفحص اليدوي للتحديث.
+  bool _checkingUpdate = false;
 
   /// v0.1.0: null until the (cached) availability check resolves —
   /// the app-lock switch stays disabled/“غير متوفر” meanwhile.
@@ -98,6 +103,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     bool? appLock,
     bool? blockShots,
     int? lockGrace,
+    int? chatFont,
   }) =>
       UserSettings(
         darkMode: darkMode ?? s.darkMode,
@@ -110,6 +116,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         appLock: appLock ?? s.appLock,
         blockScreenshots: blockShots ?? s.blockScreenshots,
         appLockGraceSecs: lockGrace ?? s.appLockGraceSecs,
+        chatFontSize: chatFont ?? s.chatFontSize,
       );
 
   void _snack(String msg) {
@@ -117,6 +124,26 @@ class _SettingsScreenState extends State<SettingsScreen> {
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
       ..showSnackBar(SnackBar(content: Text(msg)));
+  }
+
+  // ===================================================================
+  // v0.1.9 — فحص التحديث اليدوي (بلاطلة الإصدار أسفل الإعدادات)
+  // ===================================================================
+  Future<void> _checkForUpdates() async {
+    setState(() => _checkingUpdate = true);
+    final info = await UpdateService.checkLatest();
+    if (!mounted) return;
+    setState(() => _checkingUpdate = false);
+    if (info == null) {
+      _snack('تعذر التحقق — تحقق من الاتصال وأعد المحاولة');
+      return;
+    }
+    if (!info.isUpgradeAvailable) {
+      _snack('أنت على أحدث إصدار (${info.latestVersion})');
+      return;
+    }
+    if (!mounted) return;
+    showUpgradeDialog(context, info);
   }
 
   // ===================================================================
@@ -541,6 +568,55 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           .read<SettingsController>()
                           .update(_copy(settings, themeMode: sel.first)),
                     ),
+                    const SizedBox(height: 16),
+                    // v0.1.9 — حجم خط المحادثة: يُطبّق فوراً على نص
+                    // الرسائل (نص + وسائط) في كل المحادثات.
+                    Row(
+                      children: [
+                        const Icon(Icons.format_size,
+                            color: AppTheme.brandSecondary, size: 22),
+                        const SizedBox(width: 12),
+                        const Text('حجم خط المحادثة'),
+                        const Spacer(),
+                        Text('${settings.chatFontSize}',
+                            style: const TextStyle(
+                                fontWeight: FontWeight.w800,
+                                color: AppTheme.brandSecondary)),
+                      ],
+                    ),
+                    Slider(
+                      value: settings.chatFontSize.toDouble(),
+                      min: UserSettings.minChatFontSize.toDouble(),
+                      max: UserSettings.maxChatFontSize.toDouble(),
+                      divisions: UserSettings.maxChatFontSize -
+                          UserSettings.minChatFontSize,
+                      label: '${settings.chatFontSize}',
+                      onChanged: (v) => context
+                          .read<SettingsController>()
+                          .update(_copy(settings,
+                              chatFont: v.round())),
+                    ),
+                    // معاينة حية بنفس حجم التطبيق الفعلي
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: Theme.of(context)
+                            .colorScheme
+                            .surfaceContainerHighest
+                            .withValues(alpha: 0.6),
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      child: Text(
+                        'مرحباً! هذه معاينة لحجم رسائلك المشفرة 🔐',
+                        textAlign: TextAlign.right,
+                        style: TextStyle(
+                            fontSize:
+                                settings.chatFontSize.toDouble(),
+                            height: 1.4),
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -743,18 +819,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
             ),
             const SizedBox(height: 14),
-            const Card(
+            Card(
               margin: EdgeInsets.zero,
               child: ListTile(
-                leading:
-                    Icon(Icons.lock_outline, color: AppTheme.brandSecondary),
+                leading: _checkingUpdate
+                    ? const SizedBox(
+                        width: 22,
+                        height: 22,
+                        child: CircularProgressIndicator(strokeWidth: 2))
+                    : const Icon(Icons.system_update_alt_rounded,
+                        color: AppTheme.brandSecondary),
                 title: Text(AppConfig.appName,
-                    style: TextStyle(fontWeight: FontWeight.w800)),
+                    style: const TextStyle(fontWeight: FontWeight.w800)),
                 subtitle: Text(
                   'الإصدار ${AppConfig.appVersion} — مبني بتقنية تشفير '
                   'X3DH + Double Ratchet',
-                  style: TextStyle(fontSize: 11),
+                  style: const TextStyle(fontSize: 11),
                 ),
+                trailing: const Icon(Icons.chevron_left),
+                onTap: _checkingUpdate ? null : _checkForUpdates,
               ),
             ),
             const SizedBox(height: 20),

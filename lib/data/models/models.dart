@@ -567,6 +567,11 @@ class UserSettings {
   /// nothing breaks either direction.
   final String themeMode;
 
+  /// v0.1.9: حجم خط نص الرسائل داخل شاشة المحادثة (13–22).
+  /// يُحفظ في settings JSONB (بلا تغيير مخطط) — أي قيمة خارج النطاق
+  /// تُرجَع إلى الافتراضي 15 عند القراءة (defensive decode).
+  final int chatFontSize;
+
   const UserSettings({
     this.darkMode = true,
     this.notificationPreview = false,
@@ -578,7 +583,13 @@ class UserSettings {
     this.blockScreenshots = false,
     this.appLockGraceSecs = 0,
     this.themeMode = '',
+    this.chatFontSize = UserSettings.defaultChatFontSize,
   });
+
+  /// الافتراضي المعلن — المستخدم نفسه في الاختبارات وواجهة الإعدادات.
+  static const int defaultChatFontSize = 15;
+  static const int minChatFontSize = 13;
+  static const int maxChatFontSize = 22;
 
   factory UserSettings.fromJson(Map<String, dynamic> j) => UserSettings(
         darkMode: (j['dark_mode'] ?? true) as bool,
@@ -591,6 +602,7 @@ class UserSettings {
         blockScreenshots: (j['block_screenshots'] ?? false) as bool,
         appLockGraceSecs: _graceFromJson(j['app_lock_grace_secs']),
         themeMode: (j['theme_mode'] ?? '') as String,
+        chatFontSize: _fontFromJson(j['chat_font_size']),
       );
 
   /// Resolved theme preference: explicit theme_mode wins; legacy
@@ -613,6 +625,32 @@ class UserSettings {
     return const [0, 60, 300].contains(n) ? n : 0;
   }
 
+  /// v0.1.9 defensive decode: قيم غائبة/غير رقمية أو خارج [13,22]
+  /// ترجع إلى الافتراضي 15 — أجهزة قديمة وأسطر JSON قديمة تعمل بلا كسر.
+  static int _fontFromJson(dynamic v) {
+    final n = (v is num) ? v.toInt() : int.tryParse('$v');
+    if (n == null) return defaultChatFontSize;
+    if (n < minChatFontSize || n > maxChatFontSize) {
+      return defaultChatFontSize;
+    }
+    return n;
+  }
+
+  /// نسخة معدّلة بحجم خط جديد — تُستخدم من شريط الإعدادات.
+  UserSettings withChatFontSize(int size) => UserSettings(
+        darkMode: darkMode,
+        notificationPreview: notificationPreview,
+        notificationSound: notificationSound,
+        notificationVibration: notificationVibration,
+        readReceipts: readReceipts,
+        showPresence: showPresence,
+        appLock: appLock,
+        blockScreenshots: blockScreenshots,
+        appLockGraceSecs: appLockGraceSecs,
+        themeMode: themeMode,
+        chatFontSize: size.clamp(minChatFontSize, maxChatFontSize),
+      );
+
   Map<String, dynamic> toJson() => {
         'dark_mode': darkMode,
         'notification_preview': notificationPreview,
@@ -624,5 +662,6 @@ class UserSettings {
         'block_screenshots': blockScreenshots,
         'app_lock_grace_secs': appLockGraceSecs,
         'theme_mode': resolvedThemeMode,
+        'chat_font_size': chatFontSize,
       };
 }

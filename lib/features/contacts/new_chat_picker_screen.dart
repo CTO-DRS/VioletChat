@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../core/constants/app_constants.dart';
 import '../../core/utils/smart_date.dart';
 import '../../data/models/models.dart';
 import '../../routing/app_router.dart';
@@ -8,6 +9,7 @@ import '../../state/chats_controller.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/brand.dart';
 import '../chats/chat_query.dart';
+import 'qr_scan_screen.dart';
 
 /// v0.1.7 «إعادة الترتيب الكامل» — شاشة «محادثة جديدة» مستقلة.
 ///
@@ -32,6 +34,58 @@ class _NewChatPickerScreenState extends State<NewChatPickerScreen> {
   void dispose() {
     _field.dispose();
     super.dispose();
+  }
+
+  // -----------------------------------------------------------------
+  // v0.1.9 — إضافة بالباركود: مسح رمز صديق وفتح محادثته فوراً.
+  // كل الكائنات المحيطة (controller/messenger/nav) تُلتقط قبل أي await —
+  // لا استخدام لـBuildContext بعد الفجوات غير المتزامنة.
+  // -----------------------------------------------------------------
+  Future<void> _scanQr() async {
+    final chats = context.read<ChatsController>();
+    final myId = chats.services.client.auth.currentUser?.id;
+    final messenger = ScaffoldMessenger.of(context);
+    final nav = Navigator.of(context);
+
+    final username = await Navigator.push<String>(
+      context,
+      MaterialPageRoute(builder: (_) => const QrScanScreen()),
+    );
+    if (!mounted || username == null || username.isEmpty) return;
+
+    try {
+      // بحث بالمعرّف الفعلي ثم مطابقة تامة (ilike جزئي لا يكفي وحده).
+      final results = await chats.services.profiles.searchUsers(username);
+      Profile? match;
+      for (final p in results) {
+        if (p.username.toLowerCase() == username) {
+          match = p;
+          break;
+        }
+      }
+      if (match == null) {
+        messenger.showSnackBar(SnackBar(
+            content: Text(
+                'لم يُعثر على المستخدم @$username — تأكد أنه مسجل في Violet Chat')));
+        return;
+      }
+      if (match.id == myId) {
+        messenger.showSnackBar(const SnackBar(
+            content: Text('هذا رمزك أنت — امسح رمز صديق على جهازه')));
+        return;
+      }
+      final chatId = await chats.openDirectChat(match.id);
+      final chat = Chat(
+        id: chatId,
+        type: AppConstants.chatDirect,
+        peer: match,
+        createdAt: DateTime.now().toUtc().toIso8601String(),
+      );
+      nav.pushNamed(AppRoutes.chat, arguments: chat);
+    } catch (_) {
+      messenger.showSnackBar(const SnackBar(
+          content: Text('تعذر فتح المحادثة بعد المسح — تحقق من الاتصال')));
+    }
   }
 
   /// جهات الاتصال المعروفة: نظراء المحادثات الفردية مرتبين بأحدث نشاط.
@@ -122,7 +176,8 @@ class _NewChatPickerScreenState extends State<NewChatPickerScreen> {
             child: all.isEmpty
                 ? _NoContacts(
                     onGlobalSearch: () =>
-                        Navigator.pushNamed(context, AppRoutes.search))
+                        Navigator.pushNamed(context, AppRoutes.search),
+                    onScanQr: _scanQr)
                 : visible.isEmpty
                     ? _NoLocalMatches(
                         query: _query,
@@ -174,14 +229,29 @@ class _NewChatPickerScreenState extends State<NewChatPickerScreen> {
             top: false,
             child: Padding(
               padding: const EdgeInsets.fromLTRB(16, 4, 16, 10),
-              child: SizedBox(
-                width: double.infinity,
-                child: OutlinedButton.icon(
-                  onPressed: () =>
-                      Navigator.pushNamed(context, AppRoutes.search),
-                  icon: const Icon(Icons.travel_explore_rounded, size: 19),
-                  label: const Text('لا تجده بين جهات اتصالك؟ ابحث شاملاً'),
-                ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: _scanQr,
+                      icon: const Icon(Icons.qr_code_scanner_rounded,
+                          size: 19, color: AppTheme.brandSecondary),
+                      label: const Text('إضافة صديق بمسح رمز QR'),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: () =>
+                          Navigator.pushNamed(context, AppRoutes.search),
+                      icon: const Icon(Icons.travel_explore_rounded, size: 19),
+                      label: const Text('لا تجده بين جهات اتصالك؟ ابحث شاملاً'),
+                    ),
+                  ),
+                ],
               ),
             ),
           ),
@@ -193,7 +263,9 @@ class _NewChatPickerScreenState extends State<NewChatPickerScreen> {
 
 class _NoContacts extends StatelessWidget {
   final VoidCallback onGlobalSearch;
-  const _NoContacts({required this.onGlobalSearch});
+  final VoidCallback onScanQr;
+  const _NoContacts(
+      {required this.onGlobalSearch, required this.onScanQr});
 
   @override
   Widget build(BuildContext context) {
@@ -219,7 +291,7 @@ class _NoContacts extends StatelessWidget {
                 style: Theme.of(context).textTheme.titleLarge),
             const SizedBox(height: 8),
             Text(
-              'جهات اتصالك تظهر هنا بعد أول محادثة. ابحث الآن عن مستخدم بالاسم أو المعرّف لتبدأ أول محادثة مشفرة.',
+              'جهات اتصالك تظهر هنا بعد أول محادثة. ابحث الآن عن مستخدم بالاسم أو المعرّف، أو امسح رمز QR من جهاز صديق.',
               textAlign: TextAlign.center,
               style: dim,
             ),
@@ -228,6 +300,12 @@ class _NoContacts extends StatelessWidget {
               onPressed: onGlobalSearch,
               icon: const Icon(Icons.person_search_rounded, size: 19),
               label: const Text('بحث شامل عن مستخدم'),
+            ),
+            const SizedBox(height: 10),
+            OutlinedButton.icon(
+              onPressed: onScanQr,
+              icon: const Icon(Icons.qr_code_scanner_rounded, size: 19),
+              label: const Text('مسح رمز QR للإضافة'),
             ),
           ],
         ),

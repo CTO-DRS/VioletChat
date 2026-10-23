@@ -156,12 +156,13 @@ class ChatController extends ChangeNotifier {
     for (final r in rs) {
       (reactionsByMsg[r.messageId] ??= []).add(r);
     }
+    // v0.1.9: الإيصالات تُحمّل لكل المحادثات (ثنائية ومجموعات) —
+    // بلاطة «معلومات» في القائمة الطويلة صارت متاحة في الاثنين.
+    // في الثنائية قد تكون ذاكرة الإيصالات فارغة (لا صفوف بعد) — آمن.
     receiptsByMsg = {};
-    if (isGroup) {
-      final rc = await services.cache.receipts(ids);
-      for (final r in rc) {
-        (receiptsByMsg[r.messageId] ??= []).add(r);
-      }
+    final rc = await services.cache.receipts(ids);
+    for (final r in rc) {
+      (receiptsByMsg[r.messageId] ??= []).add(r);
     }
   }
 

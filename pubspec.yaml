@@ -11,7 +11,9 @@ publish_to: 'none'
 # versionCode 10: الإصدار المنشور السابق (v0.1.2) حمل code 9.
 # v0.1.5 (code 12) — v0.1.4 (code 11): رسالة تنفيذية لـpermission-denied،
 # ثم استخراج رقم ApiException الحقيقي بدل رسالة SHA-1 المضللة لكل الأعطال.
-version: 0.1.8+15
+# v0.1.9 (code 16) — v0.1.8 (code 15): إضافة بالباركود + فحص التحديث
+# داخل التطبيق + حجم خط المحادثة + معلومات الرسالة في الثنائية.
+version: 0.1.9+16
 
 environment:
   sdk: '>=3.5.0 <4.0.0'
@@ -91,6 +93,15 @@ dependencies:
   share_plus: ^10.1.3
   device_info_plus: ^11.3.0
   app_links: ^6.3.2
+
+  # --- v0.1.9: إضافة بالباركود + فحص التحديث داخل التطبيق ---
+  # qr_flutter: توليد رمز QR الشخصي (حمولة violetchat://add/<username>).
+  # mobile_scanner: مسح رمز الإضافة من جهاز آخر — 5.x متوافق مع
+  #   Kotlin 1.9/minSdk 24 القائمين (لا يرفع متطلبات البناء).
+  # url_launcher: فتح صفحة الإصدار الجديد عند اكتشاف تحديث.
+  qr_flutter: ^4.1.0
+  mobile_scanner: ^5.2.3
+  url_launcher: ^6.3.1
 
 dev_dependencies:
   flutter_test:

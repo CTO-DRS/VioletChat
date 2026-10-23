@@ -27,6 +27,7 @@ import '../../services/chat_export_service.dart';
 import '../../state/app_services.dart';
 import '../../state/chat_controller.dart';
 import '../../state/chats_controller.dart';
+import '../../state/settings_controller.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/brand.dart';
 import '../../widgets/verified_badge.dart';
@@ -44,6 +45,11 @@ class ChatScreen extends StatefulWidget {
 class _ChatScreenState extends State<ChatScreen> {
   // v0.1.0: moved to AppTheme.brandGradient — single source of truth.
   static const List<String> _emojis = ['👍', '❤️', '😂', '😮', '😢', '🎉'];
+
+  /// v0.1.9 — حجم خط نص الرسائل من الإعدادات (المظهر ← حجم خط المحادثة).
+  /// watch: تغيير الشريط يعيد بناء الفقاعات فوراً — معاينة حقيقية.
+  int get _chatFont =>
+      context.watch<SettingsController>().settings.chatFontSize;
 
   late final AppServices _services;
   ChatController? _controller;
@@ -699,7 +705,7 @@ class _ChatScreenState extends State<ChatScreen> {
                   ? 'أُزيلت من الرسائل المحفوظة'
                   : 'حُفظت في «الرسائل المحفوظة»');
             }),
-            if (mine && c.isGroup)
+            if (mine)
               _sheetTile(Icons.info_outline, 'معلومات', () {
                 Navigator.pop(sheetCtx);
                 _receiptsDialog(m);
@@ -798,7 +804,9 @@ class _ChatScreenState extends State<ChatScreen> {
                   itemCount: receipts.length,
                   itemBuilder: (ctx, i) {
                     final r = receipts[i];
-                    final name = _memberMap[r.userId]?.title ?? 'عضو';
+                    // v0.1.9: في الثنائية لا خريطة أعضاء — الطرف واحد معلوم.
+                    final name = _memberMap[r.userId]?.title ??
+                        (_c.isGroup ? 'عضو' : 'الطرف الآخر');
                     return ListTile(
                       contentPadding: EdgeInsets.zero,
                       dense: true,
@@ -1536,7 +1544,7 @@ class _ChatScreenState extends State<ChatScreen> {
                     m.text!,
                     textAlign: TextAlign.right,
                     style: TextStyle(
-                        fontSize: 15,
+                        fontSize: _chatFont.toDouble(),
                         color: mine
                             ? Colors.white
                             : Theme.of(context).colorScheme.onSurface),
@@ -1547,7 +1555,7 @@ class _ChatScreenState extends State<ChatScreen> {
                   m.text!,
                   textAlign: TextAlign.right,
                   style: TextStyle(
-                      fontSize: 15,
+                      fontSize: _chatFont.toDouble(),
                       height: 1.4,
                       color: mine
                           ? Colors.white
