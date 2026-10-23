@@ -9,7 +9,7 @@ Flutter + Firebase Authentication + Cloud Firestore + Supabase (نقل
 > قائم (DRS NEXORA سابقاً) — بلا حذف أي ميزة قائمة. منذ **v0.1.2**
 > هوية الحزمة هي `com.drs.violetchat` مطابقةً لتسجيل Firebase الرسمي
 > (مشروع `violetchat-cea68` — ووثّق أثر ذلك على التثبيت في
-> CHANGELOG v0.1.2). الإصدار الحالي: **v0.1.7** (versionCode 14).
+> CHANGELOG v0.1.2). الإصدار الحالي: **v0.1.8** (versionCode 15).
 
 ---
 

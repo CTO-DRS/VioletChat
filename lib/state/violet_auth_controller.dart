@@ -23,8 +23,13 @@ import '../services/violet_profile_service.dart';
 /// 3) إنشاء ملف Firestore users/{uid} بعد التسجيل الناجح.
 /// 4) الجسر إلى نظام المراسلة (Supabase): جلسة المراسلة تُفتح
 ///    بنفس البريد/كلمة المرور اللذين أدخلهما المستخدم للتو في
-///    الذاكرة فقط — كلمة المرور لا تُخزّن في أي مكان إطلاقاً
-///    (لا Firestore، لا SharedPreferences، لا ملفات محلية).
+///    الذاكرة فقط. منذ v0.1.8: بعد نجاح الدخول تُخزّن كلمة مرور
+///    المراسلة في التخزين المشفر بجهاز (Android Keystore —
+///    flutter_secure_storage) تحت هوية جلسة Firebase المطابقة
+///    حصراً، ليصبح زر Google سلساً في التشغيلات القادمة (المسار
+///    أ يقرأها ويدخل بلا أسئلة). لا تُخزّن في Firestore ولا
+///    SharedPreferences ولا ملفات محلية، ولا تُرسل لأي مكان غير
+///    خادم المراسلة نفسه.
 /// 5) توجيه الواجهة: authStateChanges → إشعار المستمعين، والبوابة
 ///    في app.dart تقود الشاشة المناسبة حسب حالة الجلستين.
 class VioletAuthController extends ChangeNotifier {
@@ -46,7 +51,9 @@ class VioletAuthController extends ChangeNotifier {
   final VioletProfileService violetProfiles;
 
   /// تخزين مشفر بجهاز (Android Keystore) — يُحفظ فيه مفتاح المراسلة
-  /// المولّد لحسابات Google فقط (ليس كلمات مرور المستخدمين).
+  /// المولّد لحسابات Google، ومنذ v0.1.8 أيضاً كلمة مرور المراسلة
+  /// بعد دخول ناجح بالبريد (لجعل زر Google سلساً لاحقاً). التخزين
+  /// مشفر على مستوى النظام ولا يقرؤه أي تطبيق آخر.
   static const _secure = FlutterSecureStorage(
     aOptions: AndroidOptions(encryptedSharedPreferences: true),
   );
@@ -130,6 +137,9 @@ class VioletAuthController extends ChangeNotifier {
       );
       if (bridge != null) return _fail(bridge);
 
+      // v0.1.8: حفظ مفتاح المراسلة مشفراً — زر Google يصبح سلساً.
+      await _rememberMessagingKey(messagingEmail: email, secret: password);
+
       _infoAr = 'تم إنشاء حساب Violet Chat — مرحباً بك';
       return true;
     });
@@ -152,6 +162,9 @@ class VioletAuthController extends ChangeNotifier {
         password: password,
       );
       if (bridge != null) return _fail(bridge);
+
+      // v0.1.8: حفظ مفتاح المراسلة مشفراً — زر Google يصبح سلساً.
+      await _rememberMessagingKey(messagingEmail: email, secret: password);
 
       _infoAr = null;
       return true;
@@ -255,17 +268,46 @@ class VioletAuthController extends ChangeNotifier {
         await auth.bootstrap();
         return null;
       }
-      // autoconfirm معطل على الخادم → بلا جلسة فورية.
-      return 'تم إنشاء الحساب — أكّد بريدك الإلكتروني ثم أعد المحاولة';
+      // v0.1.8 — 200-بلا-جلسة يعني حالتين مختلفتين تماماً مع حماية
+      // تعداد البريد: حساب جديد ينتظر تأكيد بريده، أو حساب قائم
+      // بكلمة مرور أخرى (الرسالة الموحدة كانت تضلل الثانية — حادثة
+      // المالك 2026-10-23). نميّز بمحاولة دخول بالمفتاح الطازج:
+      try {
+        await services.auth.signIn(email, fresh);
+        // دخول مفاجئ نجح؟ نكمل كالمعتاد.
+        await auth.bootstrap();
+        return null;
+      } catch (probeErr) {
+        switch (VioletBridgeClassifier.classifySignInProbe(probeErr)) {
+          case VioletBridgeCase.freshUnconfirmed:
+            // حساب جديد حقيقي — الرسالة الأصلية صادقة هنا.
+            return 'تم إنشاء الحساب — أكّد بريدك الإلكتروني ثم أعد المحاولة';
+          case VioletBridgeCase.existingAccount:
+            return 'بريدك له حساب مراسلة قائم بكلمة مرور مختلفة — '
+                'اضغط «الدخول بحساب مراسلة قائم» وأدخل بريدك وكلمة '
+                'المرور مرة واحدة، وسيعمل زر Google تلقائياً بعدها';
+          case VioletBridgeCase.networkIssue:
+            return 'تعذر تحديد حالة حساب المراسلة — تحقق من الإنترنت '
+                'وأعد المحاولة، وإن تملك حساباً قائماً فادخل عبر '
+                '«الدخول بحساب مراسلة قائم»';
+          case VioletBridgeCase.unknown:
+            return 'تعذر إكمال تهيئة جلسة المراسلة — إن تملك حساباً '
+                'قائماً بهذا البريد فادخل عبر «الدخول بحساب مراسلة '
+                'قائم»، وإلا فافحص بريدك للتأكيد';
+        }
+      }
     } catch (signUpErr) {
       final su = signUpErr.toString().toLowerCase();
       if (su.contains('already registered') ||
           su.contains('already been registered')) {
         // ج) حساب مراسلة قائم ببيانات مختلفة (مستخدم سابق أو
         //    إعادة تثبيت فقدت المفتاح المشفر) — توجيه صريح.
-        return 'هذا البريد له حساب مراسلة بكلمة مرور مختلفة — '
-            'استخدم «حساب مراسلة قائم» للدخول بالبريد وكلمة المرور، '
-            'أو استعد كلمة المرور من شاشة الدخول';
+        // v0.1.8: حذف «استعد كلمة المرور من شاشة الدخول» — استعادة
+        // شاشة الدخول تستهدف Firebase وحدها ولا تصلح لكلمة مرور
+        // المراسلة؛ التوجيه الصادق هو الزر المذكور حرفياً.
+        return 'هذا البريد له حساب مراسلة قائم بكلمة مرور مختلفة — '
+            'اضغط «الدخول بحساب مراسلة قائم» وأدخل بريدك وكلمة المرور '
+            'القديمة نفسها';
       }
       AppLogger.e('violet-auth', 'google messaging bridge failed', signUpErr);
       // v0.1.3: تمييز فشل الشبكة عن بقية الأسباب — الرسالة تقول أين
@@ -317,6 +359,11 @@ class VioletAuthController extends ChangeNotifier {
       if (vPass != null) return _fail(vPass);
       await auth.signIn(email.trim(), password);
       await auth.bootstrap();
+      // v0.1.8: إن وُجدت جلسة Firebase بنفس البريد (مثلاً المستخدم
+      // دخل عبر Google سابقاً) نحفظ المفتاح مشفراً — فيصبح زر
+      // Google سلساً من الآن فصاعداً عبر المسار (أ). بلا جلسة
+      // Firebase لا يُخزن شيء والسلوك القائم كما هو.
+      await _rememberMessagingKey(messagingEmail: email, secret: password);
       return true;
     });
   }
@@ -337,6 +384,9 @@ class VioletAuthController extends ChangeNotifier {
           services.auth.email?.toLowerCase() == email.toLowerCase()) {
         // الجلسة القائمة لنفس البريد — لا فعل.
         await auth.bootstrap();
+        // v0.1.8: جلسة ناجحة بنفس البيانات — خزّن المفتاح مشفراً
+        // ليبقى زر Google سلساً في التشغيلات القادمة.
+        await _rememberMessagingKey(messagingEmail: email, secret: password);
         return null;
       }
       if (services.auth.isSignedIn) {
@@ -348,6 +398,9 @@ class VioletAuthController extends ChangeNotifier {
       try {
         await services.auth.signIn(email, password);
         await auth.bootstrap();
+        // v0.1.8: الدخول نجح بنفس البيانات — خزّن المفتاح مشفراً
+        // (بشرط جلسة Firebase مطابقة) ليبقى زر Google سلساً.
+        await _rememberMessagingKey(messagingEmail: email, secret: password);
         return null;
       } catch (signInErr) {
         final s = signInErr.toString().toLowerCase();
@@ -361,19 +414,49 @@ class VioletAuthController extends ChangeNotifier {
           await services.auth.signUp(email, password, username);
           if (auth.signedIn) {
             await auth.bootstrap();
+            // v0.1.8: جلسة فورية — خزّن المفتاح مشفراً.
+            await _rememberMessagingKey(
+                messagingEmail: email, secret: password);
             return null;
           }
-          // autoconfirm معطّل على الخادم → بلا جلسة فورية.
-          return 'تم إنشاء الحساب — أكّد بريدك الإلكتروني ثم سجّل الدخول';
+          // v0.1.8 — نفس غموض جسر Google: 200-بلا-جلسة مع حماية
+          // تعداد البريد يعني حساباً جديداً انتظر التأكيد أو حساباً
+          // قائماً بكلمة مرور مختلفة (فشل الدخول الأول لا يميز —
+          // كلاهما «invalid credentials»). نميّز بالمفتاح نفسه:
+          try {
+            await services.auth.signIn(email, password);
+            await auth.bootstrap();
+            await _rememberMessagingKey(
+                messagingEmail: email, secret: password);
+            return null;
+          } catch (probeErr) {
+            switch (VioletBridgeClassifier.classifySignInProbe(probeErr)) {
+              case VioletBridgeCase.freshUnconfirmed:
+                // حساب جديد حقيقي — الرسالة صادقة هنا.
+                return 'تم إنشاء الحساب — أكّد بريدك الإلكتروني ثم سجّل الدخول';
+              case VioletBridgeCase.existingAccount:
+                return 'هذا البريد له حساب مراسلة قائم بكلمة مرور '
+                    'مختلفة — استخدم «الدخول بحساب مراسلة قائم» '
+                    'بالبريد وكلمة المرور القديمة نفسها';
+              case VioletBridgeCase.networkIssue:
+                return 'تعذر تحديد حالة حساب المراسلة — تحقق من '
+                    'الإنترنت وأعد المحاولة';
+              case VioletBridgeCase.unknown:
+                return 'تعذر إكمال تهيئة جلسة المراسلة — أعد المحاولة '
+                    'أو استخدم «الدخول بحساب مراسلة قائم»';
+            }
+          }
         } catch (signUpErr) {
           final su = signUpErr.toString().toLowerCase();
           if (su.contains('already registered') ||
               su.contains('already been registered')) {
             // حساب مراسلة قائم بكلمة مرور أقدم (مثلاً بعد تغييرها
             // عبر استعادة Firebase) — المستخدم يحتاج مزامنة.
+            // v0.1.8: توجيه حرفي للزر الصحيح بدل إيحاء بأن استعادة
+            // شاشة الدخول (التي تستهدف Firebase) تصلح هنا.
             return 'حساب المراسلة لهذا البريد بكلمة مرور مختلفة — '
-                'استخدم «حساب مراسلة قائم» أو حدّث كلمة المرور من '
-                'استعادة الحساب القائم ثم أعد الدخول';
+                'استخدم «الدخول بحساب مراسلة قائم» بالبريد وكلمة '
+                'المرور القديمة نفسها';
           }
           rethrow;
         }
@@ -388,6 +471,35 @@ class VioletAuthController extends ChangeNotifier {
   // أدوات الحالة
   // ----------------------------------------------------------------
   final bool _running = false; // حارس إضافي ضد التزامن (متسق مع busy)
+
+  /// v0.1.8 — يجعل زر Google سلساً بعد أي دخول مراسلة ناجح بالبريد:
+  /// يخزن السر (كلمة المرور التي نجح الدخول بها = مفتاح المراسلة
+  /// في هذا المسار) مشفراً على الجهاز تحت معرف جلسة Firebase نفسه
+  /// الذي يقرأه جسر Google لاحقاً (المسار أ — دخول مباشر بلا أسئلة).
+  ///
+  /// الشروط الصارمة (وإلا لا يُخزن شيء):
+  /// 1) جلسة Firebase قائمة — لا ربط بلا هوية Violet.
+  /// 2) بريد جلسة Firebase يطابق بريد المراسلة (تجاهل حالة الأحرف)
+  ///    — لا نخزن سراً تحت هوية بريد آخر أبداً.
+  /// الفشل هنا غير قاتل عمداً: مسار الدخول الحالي نجح أصلاً ولا
+  /// يبرره تعطل التخزين — يسجَّل تحذير وينتهي بصمت.
+  Future<void> _rememberMessagingKey({
+    required String messagingEmail,
+    required String secret,
+  }) async {
+    try {
+      final u = violet.currentUser;
+      if (u == null) return; // لا جلسة Firebase — لا ربط.
+      final fEmail = (u.email ?? '').trim().toLowerCase();
+      final mEmail = messagingEmail.trim().toLowerCase();
+      if (fEmail.isEmpty || fEmail != mEmail) return; // بريد مختلف — لا ربط.
+      if (secret.isEmpty) return;
+      await _secure.write(key: _messagingKeyStorageId(u.uid), value: secret);
+      AppLogger.i('violet-auth', 'messaging key remembered for Google bridge');
+    } catch (e) {
+      AppLogger.w('violet-auth', 'remember messaging key failed', e);
+    }
+  }
 
   Future<bool> _run(Future<bool> Function() body) async {
     if (_running || _busy) return false; // منع الإرسال المزدوج

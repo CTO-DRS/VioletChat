@@ -11,7 +11,7 @@ publish_to: 'none'
 # versionCode 10: الإصدار المنشور السابق (v0.1.2) حمل code 9.
 # v0.1.5 (code 12) — v0.1.4 (code 11): رسالة تنفيذية لـpermission-denied،
 # ثم استخراج رقم ApiException الحقيقي بدل رسالة SHA-1 المضللة لكل الأعطال.
-version: 0.1.7+14
+version: 0.1.8+15
 
 environment:
   sdk: '>=3.5.0 <4.0.0'

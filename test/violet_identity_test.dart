@@ -416,4 +416,91 @@ void main() {
       await expectLater(svc.googleSignOut(), completes);
     });
   });
+
+  group('VioletBridgeClassifier — v0.1.8 الصدق في جسر Google', () {
+    test('حساب جديد غير مؤكد (email_not_confirmed) — رسالة التأكيد صادقة',
+        () {
+      // رسالة GoTrue الحقيقية لمستخدم أنشئ للتو مع تأكيد البريد مفعل.
+      expect(
+        VioletBridgeClassifier.classifySignInProbe(
+          Exception('{"code":400,"error_code":"email_not_confirmed",'
+              '"msg":"Email not confirmed"}'),
+        ),
+        VioletBridgeCase.freshUnconfirmed,
+      );
+      expect(
+        VioletBridgeClassifier.classifySignInProbe(
+          Exception('Email not confirmed'),
+        ),
+        VioletBridgeCase.freshUnconfirmed,
+      );
+    });
+
+    test('حساب قائم بكلمة مرور مختلفة (invalid login credentials) — '
+        'رسالة التوجيه للزر الصحيح', () {
+      // رسالة GoTrue الحقيقية حين يكون البريد موجوداً بكلمة مرور أخرى
+      // (حادثة المالك 2026-10-23: تثبيت جديد فقد المفتاح المشفر).
+      expect(
+        VioletBridgeClassifier.classifySignInProbe(
+          Exception('{"code":400,"error_code":"invalid_credentials",'
+              '"msg":"Invalid login credentials"}'),
+        ),
+        VioletBridgeCase.existingAccount,
+      );
+      expect(
+        VioletBridgeClassifier.classifySignInProbe(
+          Exception('Invalid login credentials'),
+        ),
+        VioletBridgeCase.existingAccount,
+      );
+    });
+
+    test('انقطاع الشبكة أثناء الفحص — لا حكم يصدر (حياد صادق)', () {
+      expect(
+        VioletBridgeClassifier.classifySignInProbe(
+          Exception('SocketException: Failed host lookup'),
+        ),
+        VioletBridgeCase.networkIssue,
+      );
+      expect(
+        VioletBridgeClassifier.classifySignInProbe(
+          Exception('ClientException: Connection closed'),
+        ),
+        VioletBridgeCase.networkIssue,
+      );
+    });
+
+    test('رسالة غير متوقعة → unknown وليس تشخيصاً مختلقاً', () {
+      expect(
+        VioletBridgeClassifier.classifySignInProbe(
+          Exception('something totally unexpected happened'),
+        ),
+        VioletBridgeCase.unknown,
+      );
+      expect(
+        // حالة حدّية: رسالة فيها «credentials» وحدها لا تكفي —
+        // يجب أن تكون رسالة رفض الاعتماد الفعلية.
+        VioletBridgeClassifier.classifySignInProbe(
+          Exception('weird credentials talk'),
+        ),
+        VioletBridgeCase.unknown,
+      );
+    });
+
+    test('الأولوية: الشبكة تسبق كل شيء — رسالة شبكة فيها credentials لا تُخدع',
+        () {
+      expect(
+        VioletBridgeClassifier.classifySignInProbe(Exception(
+            'ClientException: network error while fetching credentials')),
+        VioletBridgeCase.networkIssue,
+      );
+    });
+
+    test('مفتاح المراسلة المولّد يتوافق مع مواصفات المسار (أ)', () {
+      // المفتاح الطازج الذي يولده جسر Google يجب أن يجتاز فحص
+      // looksGenerated حتى يقبله المسار (أ) بعد إعادة التشغيل.
+      final key = VioletMessagingKey.generate();
+      expect(VioletMessagingKey.looksGenerated(key), isTrue);
+    });
+  });
 }

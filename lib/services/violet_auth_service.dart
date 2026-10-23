@@ -258,6 +258,56 @@ class VioletMessagingKey {
 }
 
 /// ============================================================
+/// v0.1.8 — تصنيف حالة «signUp نجح بلا جلسة» في جسر Google.
+/// ============================================================
+/// الخلفية: حين تكون حماية تعداد البريد مفعّلة على GoTrue يعيد
+/// signup استجابة 200 بلا جلسة **للحالتين معاً**: حساب جديد انتظر
+/// تأكيد بريده، وحساب قائم بكلمة مرور مختلفة — والرسالة الواحدة
+/// «أكد بريدك» صادقة للأولى ومضللة للثانية (المالك اصطدم بها
+/// فعلاً 2026-10-23). التمييز يتم بمحاولة دخول لاحقة بالمفتاح
+/// الطازج: رسالة GoTrue بين الحالتين مختلفة تماماً.
+enum VioletBridgeCase {
+  /// حساب أُنشئ للتو — بلا جلسة لأن تأكيد البريد مطلوب.
+  freshUnconfirmed,
+
+  /// البريد له حساب مراسلة قائم بكلمة مرور أخرى (تثبيت جديد
+  /// فقد المفتاح المشفر، أو مستخدم DRS NEXORA سابق).
+  existingAccount,
+
+  /// تعذر الفحص لانقطاع شبكة — لا حكم يُصدَر.
+  networkIssue,
+
+  /// رسالة غير متوقعة — نتعامل بحياد صادق.
+  unknown,
+}
+
+class VioletBridgeClassifier {
+  VioletBridgeClassifier._();
+
+  /// منطق نقي بلا خدمة حية — يُختبر مباشرة برسائل GoTrue الحقيقية.
+  static VioletBridgeCase classifySignInProbe(Object error) {
+    final s = error.toString().toLowerCase();
+    final net = s.contains('socketexception') ||
+        s.contains('failed host lookup') ||
+        s.contains('clientexception') ||
+        s.contains('connection') ||
+        s.contains('network');
+    if (net) return VioletBridgeCase.networkIssue;
+    // حساب جديد غير مؤكد: GoTrue يمنح الدخول برسالة email_not_confirmed.
+    if (s.contains('not confirmed') || s.contains('email_not_confirmed')) {
+      return VioletBridgeCase.freshUnconfirmed;
+    }
+    // حساب قائم بكلمة مرور مختلفة (أو بريد غير موجود — لا يهم هنا
+    // لأننا وصلنا بعد signup نجح، فالوجود شبه المؤكد هو الحالة).
+    if (s.contains('invalid login credentials') ||
+        s.contains('invalid_credentials')) {
+      return VioletBridgeCase.existingAccount;
+    }
+    return VioletBridgeCase.unknown;
+  }
+}
+
+/// ============================================================
 /// التحقق من الحقول — منطق نقي (وحدات اختبار بلا Firebase).
 /// ============================================================
 class VioletValidators {
