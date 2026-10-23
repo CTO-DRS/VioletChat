@@ -218,8 +218,7 @@ class StoryService {
     final authorPubs =
         authorBundles.map((b) => b.identityKey).toSet().toList();
 
-    for (final raw in wraps) {
-      final w = raw as Map<String, dynamic>;
+    for (final w in wraps) {
       final wrapped = w['wrapped'] as String;
       final nonce = w['nonce'] as String;
       for (final pub in authorPubs) {
