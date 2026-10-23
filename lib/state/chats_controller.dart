@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
+import '../core/constants/app_constants.dart';
 import '../core/storage/local_database.dart';
 import '../core/storage/message_cache.dart';
 import '../data/models/models.dart';
@@ -115,7 +116,10 @@ class ChatsController extends ChangeNotifier {
         final chat = chats.where((c) => c.id == chatId).firstOrNull;
         final m = await services.cache.lastForChat(chatId);
         if (m != null) previews[chatId] = m;
-        if (chat != null) {
+        // v0.1.10: encrypted ballots never ring — they are tallied
+        // silently inside the poll bubble (unread badge still counts).
+        final isBallot = m?.kind == AppConstants.kindPollVote;
+        if (chat != null && !isBallot) {
           // v0.1.0: muted chats keep receiving messages silently —
           // no notification, no sound, unread badge still applies.
           if (!chat.isMuted) {

@@ -17,6 +17,7 @@ import 'package:share_plus/share_plus.dart';
 import 'package:video_player/video_player.dart';
 
 import '../../core/config/app_config.dart';
+import '../../core/constants/app_constants.dart';
 import '../../core/errors/app_exception.dart';
 import '../../core/storage/local_database.dart';
 import '../../core/utils/disappearing_policy.dart';
@@ -29,6 +30,7 @@ import '../../state/chat_controller.dart';
 import '../../state/chats_controller.dart';
 import '../../state/settings_controller.dart';
 import '../../theme/app_theme.dart';
+import 'poll_widgets.dart';
 import '../../widgets/brand.dart';
 import '../../widgets/verified_badge.dart';
 import '../../widgets/swipe_to_reply.dart';
@@ -1261,7 +1263,7 @@ class _ChatScreenState extends State<ChatScreen> {
     return AnimatedBuilder(
       animation: _c,
       builder: (context, _) {
-        final msgs = _c.messages;
+        final msgs = _c.chatMessages;
         if (msgs.isEmpty) {
           return _emptyState();
         }
@@ -1377,7 +1379,16 @@ class _ChatScreenState extends State<ChatScreen> {
     final mine = m.senderId == _c.myId;
     final reactions = _c.reactionsByMsg[m.id] ?? const <Reaction>[];
 
-    final bubble = _bubble(m, mine);
+    final bubble = m.kind == AppConstants.kindPoll
+        ? PollBubble(
+            pollMsg: m,
+            mine: mine,
+            chatMessages: _c.messages,
+            myId: _c.myId,
+            font: _chatFont.toDouble(),
+            onVote: (i) => _c.castVote(m, i),
+          )
+        : _bubble(m, mine);
     final highlighted = _highlightId == m.id;
     // v0.1.0: key registry for tap-to-jump on reply quotes + flash.
     final key = _tileKeys.putIfAbsent(m.id, GlobalKey.new);
@@ -2115,6 +2126,24 @@ class _ChatScreenState extends State<ChatScreen> {
                     ),
                   ),
                 ],
+              ),
+              const SizedBox(height: 10),
+              // v0.1.10: encrypted poll — one full-width tile below the
+              // media grid (mockup keeps the 3-column media row intact).
+              _attachTile(
+                sheetCtx,
+                icon: Icons.poll_rounded,
+                label: 'استطلاع رأي',
+                hint: 'سؤال وخيارات مشفرة',
+                gradient: const LinearGradient(
+                    colors: [Color(0xFF6366F1), Color(0xFF8B5CF6)]),
+                onTap: () {
+                  Navigator.of(sheetCtx).pop();
+                  showPollComposerSheet(
+                    context,
+                    onPublish: (q, opts) => _c.sendPoll(q, opts),
+                  );
+                },
               ),
               const SizedBox(height: 10),
               Text(

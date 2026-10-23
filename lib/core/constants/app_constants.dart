@@ -7,6 +7,14 @@ class AppConstants {
   static const String kindSystem = 'system';
   static const String kindMedia = 'media';
 
+  /// v0.1.10: encrypted poll message — question+options live INSIDE the
+  /// ciphertext (E2E). Votes ride as kind=pollVote rows replying to it.
+  static const String kindPoll = 'poll';
+
+  /// v0.1.10: one encrypted ballot (option index) — reply_to = poll row.
+  /// Hidden from the transcript; tallied client-side (last vote wins).
+  static const String kindPollVote = 'pollVote';
+
   // Media subtypes (stored inside the encrypted payload)
   static const String mediaImage = 'image';
   static const String mediaAudio = 'audio';

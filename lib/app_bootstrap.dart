@@ -13,6 +13,7 @@ import 'state/app_services.dart';
 import 'state/auth_controller.dart';
 import 'state/chats_controller.dart';
 import 'state/settings_controller.dart';
+import 'state/stories_controller.dart';
 import 'state/violet_auth_controller.dart';
 import 'widgets/brand.dart';
 
@@ -223,6 +224,11 @@ class _VioletBootstrapState extends State<VioletBootstrap> {
             ChangeNotifierProvider(
               create: (ctx) =>
                   ChatsController(services, ctx.read<AuthController>()),
+            ),
+            ChangeNotifierProvider(
+              create: (ctx) => StoriesController(
+                  services, ctx.read<AuthController>())
+                ..start(),
             ),
           ],
           child: const VioletApp(),

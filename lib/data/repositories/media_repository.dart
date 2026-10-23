@@ -9,6 +9,7 @@ import '../../core/config/app_config.dart';
 /// Path layout (ownership-aware, enforced by storage RLS):
 ///   media/{chatId}/{userId}/{uuid}.enc
 ///   media/{chatId}/{userId}/thumb_{uuid}.enc
+///   media/stories/{userId}/{uuid}.enc   (v0.1.10 — ring-encrypted)
 class MediaRepository {
   final SupabaseClient client;
   MediaRepository(this.client);
@@ -20,6 +21,24 @@ class MediaRepository {
         ? 'thumb_${DateTime.now().millisecondsSinceEpoch}_${_rand(8)}'
         : '${DateTime.now().millisecondsSinceEpoch}_${_rand(8)}';
     final path = 'media/$chatId/$uid/$name.enc';
+    await client.storage.from('media').uploadBinary(
+          path,
+          encrypted,
+          fileOptions: const FileOptions(
+            contentType: 'application/octet-stream',
+            upsert: false,
+          ),
+        );
+    return path;
+  }
+
+  /// v0.1.10 — story media lives under media/stories/{myId}/… so the
+  /// dedicated storage RLS (media_story_*) applies: I own my prefix,
+  /// friends can download but never write.
+  Future<String> uploadStory(Uint8List encrypted) async {
+    final uid = client.auth.currentUser!.id;
+    final name = '${DateTime.now().millisecondsSinceEpoch}_${_rand(8)}';
+    final path = 'media/stories/$uid/$name.enc';
     await client.storage.from('media').uploadBinary(
           path,
           encrypted,

@@ -15,6 +15,7 @@ import '../features/profile/profile_screen.dart';
 import '../features/search/search_screen.dart';
 import '../features/settings/security_screen.dart';
 import '../features/settings/settings_screen.dart';
+import '../features/stories/story_screens.dart';
 import '../state/chats_controller.dart';
 
 /// Named routes — simple and explicit.
@@ -33,6 +34,10 @@ class AppRoutes {
   static const String mediaGallery = '/chat/media';
   static const String call = '/call';
   static const String groupCall = '/group-call';
+
+  // v0.1.10 — encrypted stories
+  static const String storyCompose = '/stories/compose';
+  static const String storyView = '/stories/view';
 }
 
 class AppRouter {
@@ -93,6 +98,13 @@ class AppRouter {
         return _detail(const SecurityScreen(), settings);
       case AppRoutes.starred:
         return _detail(const StarredScreen(), settings);
+      case AppRoutes.storyCompose:
+        return _detail(const StoryComposerScreen(), settings);
+      case AppRoutes.storyView:
+        final authorId = settings.arguments is String
+            ? settings.arguments as String
+            : null;
+        return _fade(StoryViewerScreen(authorId: authorId), settings);
       case AppRoutes.mediaGallery:
         final chat = settings.arguments as Chat;
         return _detail(MediaGalleryScreen(chat: chat), settings);

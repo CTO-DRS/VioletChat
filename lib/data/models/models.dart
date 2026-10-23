@@ -301,6 +301,61 @@ class MediaInfo {
   }
 }
 
+/// v0.1.10 — encrypted poll payload. The question and the options live
+/// INSIDE the ciphertext (E2E); the server only ever sees kind='poll'.
+/// Votes are separate 'pollVote' message rows whose plaintext reply_to
+/// links them to the poll row; the ballot itself (option index) is
+/// encrypted like any other message. Tallying is client-side (see
+/// PollTally) — the server cannot count what it cannot read.
+class PollInfo {
+  /// Stable identity inside the ciphertext. On the server the poll's
+  /// message row id is the natural link, but the id is not known before
+  /// INSERT — so the creator mints a client-side id and carries it in
+  /// every ballot too (defence in depth against reply_to spoofing).
+  final String pollId;
+  final String question;
+  final List<String> options;
+
+  /// v1: single-choice polls only. Kept in the wire format so future
+  /// multi-choice versions can coexist without a schema bump.
+  final bool multi;
+
+  const PollInfo({
+    required this.pollId,
+    required this.question,
+    required this.options,
+    this.multi = false,
+  });
+
+  Map<String, dynamic> toJson() => {
+        'pollId': pollId,
+        'question': question,
+        'options': options,
+        'multi': multi,
+      };
+
+  static PollInfo? fromJson(Map<String, dynamic>? j) {
+    if (j == null) return null;
+    try {
+      final opts = (j['options'] as List?)
+              ?.map((e) => '$e')
+              .toList() ??
+          const <String>[];
+      return PollInfo(
+        pollId: (j['pollId'] ?? '') as String,
+        question: (j['question'] ?? '') as String,
+        options: opts,
+        multi: (j['multi'] ?? false) as bool,
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Defensive index check for incoming ballots.
+  bool isValidOption(int i) => i >= 0 && i < options.length;
+}
+
 /// Lifecycle of an outgoing message on THIS device.
 enum MsgState { queued, sending, sent, delivered, read, failed }
 
@@ -310,9 +365,21 @@ class Message {
   final String senderId;
   final String senderDeviceId;
   final String clientMsgId;
-  final String kind; // text | media | system
+  final String kind; // text | media | system | poll | pollVote
   final String? text; // decrypted
   final MediaInfo? media; // decrypted
+
+  /// v0.1.10: decrypted poll body (kind == 'poll' only).
+  final PollInfo? poll;
+
+  /// v0.1.10: decrypted ballot option index (kind == 'pollVote' only).
+  final int? pollVote;
+
+  /// v0.1.10: encrypted poll linkage for ballots — the creator's
+  /// client-side PollInfo.pollId. ALWAYS present on ballots (travels
+  /// inside the ciphertext); reply_to duplicates it in plaintext only
+  /// when the poll row id is already known (FK-safe).
+  final String? pollRef;
   final String? replyTo;
   final String? replyPreview;
 
@@ -345,6 +412,9 @@ class Message {
     required this.kind,
     this.text,
     this.media,
+    this.poll,
+    this.pollVote,
+    this.pollRef,
     this.replyTo,
     this.replyPreview,
     this.forwardedFrom,
@@ -370,6 +440,9 @@ class Message {
     required String kind,
     String? replyTo,
     String? replyPreview,
+    PollInfo? poll,
+    int? pollVote,
+    String? pollRef,
   }) =>
       Message(
         id: clientMsgId, // provisional id until server confirms
@@ -380,6 +453,9 @@ class Message {
         kind: kind,
         text: text,
         media: media,
+        poll: poll,
+        pollVote: pollVote,
+        pollRef: pollRef,
         replyTo: replyTo,
         replyPreview: replyPreview,
         createdAt: DateTime.now().toUtc().toIso8601String(),
@@ -399,6 +475,9 @@ class Message {
     MsgState? localState,
     String? failureReason,
     String? forwardedFrom,
+    PollInfo? poll,
+    int? pollVote,
+    String? pollRef,
   }) =>
       Message(
         id: id,
@@ -409,6 +488,9 @@ class Message {
         kind: kind,
         text: text ?? this.text,
         media: media,
+        poll: poll ?? this.poll,
+        pollVote: pollVote ?? this.pollVote,
+        pollRef: pollRef ?? this.pollRef,
         replyTo: replyTo,
         replyPreview: replyPreview,
         forwardedFrom: forwardedFrom ?? this.forwardedFrom,

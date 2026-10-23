@@ -204,10 +204,20 @@ class MessageCryptoService {
 // ------------------------------------------------------------------
 
 class InnerPayload {
-  final String kind; // text | media | system
+  final String kind; // text | media | system | poll | pollVote
   final String? text;
   final MediaInfo? media;
   final String? replyTo;
+
+  /// v0.1.10: decrypted poll body (kind == 'poll').
+  final PollInfo? poll;
+
+  /// v0.1.10: ballot option index (kind == 'pollVote').
+  final int? pollVote;
+
+  /// v0.1.10: encrypted poll linkage (kind == 'pollVote') — the
+  /// creator's PollInfo.pollId, inside the ciphertext.
+  final String? pollRef;
 
   /// v0.1.0: original message id when this row arrived by forwarding.
   /// Rides INSIDE the ciphertext (E2E metadata) and is mirrored in the
@@ -219,6 +229,9 @@ class InnerPayload {
     required this.kind,
     this.text,
     this.media,
+    this.poll,
+    this.pollVote,
+    this.pollRef,
     this.replyTo,
     this.forwardedFrom,
     this.decrypted = true,
@@ -228,6 +241,9 @@ class InnerPayload {
         kind: (j['kind'] ?? 'text') as String,
         text: j['text'] as String?,
         media: MediaInfo.fromJson(j['media'] as Map<String, dynamic>?),
+        poll: PollInfo.fromJson(j['poll'] as Map<String, dynamic>?),
+        pollVote: (j['vote'] as num?)?.toInt(),
+        pollRef: j['pollRef'] as String?,
         replyTo: j['replyTo'] as String?,
         forwardedFrom: j['forwardedFrom'] as String?,
       );
@@ -236,6 +252,9 @@ class InnerPayload {
         'kind': kind,
         if (text != null) 'text': text,
         if (media != null) 'media': media!.toJson(),
+        if (poll != null) 'poll': poll!.toJson(),
+        if (pollVote != null) 'vote': pollVote,
+        if (pollRef != null) 'pollRef': pollRef,
         if (replyTo != null) 'replyTo': replyTo,
         if (forwardedFrom != null) 'forwardedFrom': forwardedFrom,
       };

@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import '../core/config/app_config.dart';
+import '../core/constants/app_constants.dart';
 import '../core/utils/disappearing_policy.dart';
 import '../data/models/models.dart';
 import '../services/media_service.dart';
@@ -16,6 +17,12 @@ class ChatController extends ChangeNotifier {
   ChatController(this.services, this.chat);
 
   List<Message> messages = [];
+
+  /// v0.1.10: transcript view — encrypted ballots (kind pollVote) are
+  /// synced and cached like any message (they drive the tally) but are
+  /// never rendered as chat rows.
+  List<Message> get chatMessages =>
+      messages.where((m) => m.kind != AppConstants.kindPollVote).toList();
   Map<String, List<Reaction>> reactionsByMsg = {};
   Map<String, List<Receipt>> receiptsByMsg = {};
   String? typingUserId;
@@ -354,6 +361,35 @@ class ChatController extends ChangeNotifier {
     newBelow = 0;
     await _refreshWindow();
     notifyListeners();
+  }
+
+  /// v0.1.10 — publish an encrypted poll into this chat.
+  Future<void> sendPoll(String question, List<String> options) async {
+    if (question.trim().isEmpty || options.length < 2) return;
+    final m = await services.sync.enqueuePoll(
+        chat, question.trim(), options.map((o) => o.trim()).toList());
+    messages = [...messages, m];
+    _clearReply();
+    notifyListeners();
+    await services.sync.drain();
+    atLatest = true;
+    newBelow = 0;
+    await _refreshWindow();
+    notifyListeners();
+  }
+
+  /// v0.1.10 — cast (or change) my ballot on [pollMsg]. Optimistic:
+  /// the placeholder ballot updates the tally instantly; the encrypted
+  /// row follows through the normal outbox path. Votes are hidden from
+  /// the transcript — the bubble re-renders from the tally.
+  Future<void> castVote(Message pollMsg, int optionIndex) async {
+    if (pollMsg.poll == null) return;
+    try {
+      await services.sync.enqueuePollVote(chat, pollMsg, optionIndex);
+      notifyListeners();
+    } catch (_) {
+      // Invalid option / no poll — silently ignore (bubble stays put).
+    }
   }
 
   Future<void> editMessage(Message m, String newText) async {

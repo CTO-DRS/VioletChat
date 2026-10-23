@@ -24,6 +24,7 @@ import '../services/presence_service.dart';
 import '../services/push_service.dart';
 import '../services/realtime_service.dart';
 import '../services/session_manager.dart';
+import '../services/story_service.dart';
 import '../services/sync_engine.dart';
 
 /// Composition root — one place builds and owns the service graph.
@@ -54,6 +55,7 @@ class AppServices {
   late final RealtimeService realtime;
   late final NotificationService notifications;
   late final MediaService mediaService;
+  late final StoryService stories;
   late final CallService call;
   late final GroupCallService groupCall;
   late final CallTransport callTransport;
@@ -98,6 +100,7 @@ class AppServices {
     cache = const MessageCache();
     notifications = NotificationService();
     mediaService = MediaService(mediaRepo, crypto);
+    stories = StoryService(client, keys, mediaRepo, identity);
     callTransport = CallTransport(client);
     call = CallService(client, notifications, callTransport);
     groupCall = GroupCallService(client, notifications, callTransport);

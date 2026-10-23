@@ -9,9 +9,9 @@ Flutter + Firebase Authentication + Cloud Firestore + Supabase (نقل
 > قائم (DRS NEXORA سابقاً) — بلا حذف أي ميزة قائمة. منذ **v0.1.2**
 > هوية الحزمة هي `com.drs.violetchat` مطابقةً لتسجيل Firebase الرسمي
 > (مشروع `violetchat-cea68` — ووثّق أثر ذلك على التثبيت في
-> CHANGELOG v0.1.2). الإصدار الحالي: **v0.1.9** (versionCode 16) —
-> «اضف مميزات»: إضافة بالباركود (QR)، فحص التحديث داخل التطبيق،
-> حجم خط المحادثة، ومعلومات الرسالة في الثنائية.
+> CHANGELOG v0.1.2). الإصدار الحالي: **v0.1.10** (versionCode 17) —
+> «استطلاعات وحالات»: استطلاعات رأي مشفرة طرف-لطرف وحالات/ستوري
+> مشفرة للأصدقاء بصلاحية 24 ساعة.
 
 ---
 
@@ -28,6 +28,8 @@ Flutter + Firebase Authentication + Cloud Firestore + Supabase (نقل
 | التشفير الثنائي طرف-لطرف | VERIFIED (اختبارات) — NOT VERIFIED ميدانياً |
 | المجموعات + تدوير المفاتيح | IMPLEMENTED — NOT VERIFIED ميدانياً |
 | رسائل نصية + وسائط مشفرة | IMPLEMENTED — NOT VERIFIED ميدانياً |
+| استطلاعات رأي مشفرة (سؤال/خيارات/أصوات داخل التشفير) | IMPLEMENTED (v0.1.10) — NOT VERIFIED ميدانياً |
+| حالات/ستوري مشفرة للأصدقاء (24 ساعة، نص+صورة، مشاهدون) | IMPLEMENTED (v0.1.10) — NOT VERIFIED ميدانياً |
 | مكالمات WebRTC ثنائية + جماعية (mesh ≤ 8) | IMPLEMENTED — NOT VERIFIED ميدانياً |
 | أوفلاين + مزامنة | IMPLEMENTED — NOT VERIFIED ميدانياً |
 | Realtime + مؤشر الكتابة + حضور «متصل الآن» | IMPLEMENTED — NOT VERIFIED ميدانياً |

@@ -16,11 +16,13 @@ import '../../routing/app_router.dart';
 import '../../state/app_services.dart';
 import '../../state/auth_controller.dart';
 import '../../state/chats_controller.dart';
+import '../../state/stories_controller.dart';
 import '../../theme/app_theme.dart';
 import '../../services/update_service.dart';
 import '../../widgets/brand.dart';
 import '../../widgets/upgrade_dialog.dart';
 import '../../widgets/verified_badge.dart';
+import '../stories/story_screens.dart';
 import 'chat_query.dart';
 
 /// Home shell — v0.1.2 «Neon Nebula» redesign:
@@ -885,7 +887,13 @@ class _ChatsScreenState extends State<ChatsScreen>
         _topBar(showSearch: true),
         Expanded(
           child: RefreshIndicator(
-            onRefresh: controller.load,
+            onRefresh: () async {
+              // v0.1.10: التقاط متحكم الحالات قبل الفجوة اللاتزامنية
+              final stories = context.read<StoriesController>();
+              await controller.load();
+              // v0.1.10: حلقة الحالات تتجدد مع السحب-للتحديث
+              unawaited(stories.refresh());
+            },
             child: skeleton
                 ? _SkeletonList(pulse: _pulse)
                 : chats.isEmpty
@@ -904,6 +912,8 @@ class _ChatsScreenState extends State<ChatsScreen>
                         physics: const AlwaysScrollableScrollPhysics(),
                         padding: const EdgeInsets.only(bottom: 120),
                         children: [
+                          // v0.1.10: شريط الحالات المشفرة — أعلى القائمة
+                          const StoryRingBar(),
                           _banners(controller),
                           _SearchPill(
                             controller: _searchField,
@@ -955,8 +965,11 @@ class _ChatsScreenState extends State<ChatsScreen>
         Expanded(
           child: RefreshIndicator(
             onRefresh: () async {
+              // v0.1.10: التقاط متحكم الحالات قبل الفجوة اللاتزامنية
+              final stories = context.read<StoriesController>();
               await controller.load();
               await _loadPresence();
+              await stories.refresh();
             },
             child: ListView(
               physics: const AlwaysScrollableScrollPhysics(),
@@ -997,7 +1010,9 @@ class _ChatsScreenState extends State<ChatsScreen>
                     ],
                   ),
                 ),
-                const SizedBox(height: 18),
+                // v0.1.10: شريط الحالات المشفرة — بين البطاقات وجهات الاتصال
+                const StoryRingBar(),
+                const SizedBox(height: 4),
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 18),
                   child: Align(

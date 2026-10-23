@@ -142,6 +142,85 @@ class SyncEngine {
     });
   }
 
+  /// v0.1.10 — encrypted poll. Question + options travel INSIDE the
+  /// ciphertext; the server row only carries kind='poll'. The poll's
+  /// clientMsgId doubles as PollInfo.pollId so ballots cast against the
+  /// server row (reply_to) and optimistic placeholders both resolve.
+  Future<Message> enqueuePoll(
+      Chat chat, String question, List<String> options) async {
+    final clientMsgId = _uuid();
+    final poll = PollInfo(pollId: clientMsgId, question: question,
+        options: options);
+    final inner = {
+      'kind': 'poll',
+      'poll': poll.toJson(),
+    };
+    final m = Message.placeholder(
+      clientMsgId: clientMsgId,
+      chatId: chat.id,
+      senderId: auth.userId!,
+      senderDeviceId: crypto.identity.deviceId,
+      text: question,
+      media: null,
+      kind: 'poll',
+      poll: poll,
+    );
+    await cache.upsertMessage(m);
+    await _enqueue(chat.id, 'send', {
+      'client_msg_id': clientMsgId,
+      'chat_id': chat.id,
+      'kind': 'poll',
+      'inner': inner,
+    });
+    return m;
+  }
+
+  /// v0.1.10 — one encrypted ballot. The poll linkage rides INSIDE the
+  /// ciphertext (pollRef = creator's PollInfo.pollId) so it works even
+  /// before the poll row id is known; plaintext reply_to duplicates the
+  /// link only when the server row id exists (FK-safe). Re-casting
+  /// replaces the previous vote during tallying (last ballot wins).
+  Future<Message> enqueuePollVote(
+      Chat chat, Message pollMsg, int optionIndex) async {
+    final poll = pollMsg.poll;
+    if (poll == null) {
+      throw StateError('pollVote on a non-poll message');
+    }
+    if (!poll.isValidOption(optionIndex)) {
+      throw RangeError.index(optionIndex, 'optionIndex');
+    }
+    final clientMsgId = _uuid();
+    final inner = {
+      'kind': 'pollVote',
+      'vote': optionIndex,
+      'pollRef': poll.pollId,
+    };
+    // FK-safe plaintext linkage: the poll row id only exists once the
+    // server confirmed the poll (never for optimistic placeholders).
+    final replyTo = pollMsg.isMinePlaceholder ? null : pollMsg.id;
+    final m = Message.placeholder(
+      clientMsgId: clientMsgId,
+      chatId: chat.id,
+      senderId: auth.userId!,
+      senderDeviceId: crypto.identity.deviceId,
+      text: null,
+      media: null,
+      kind: 'pollVote',
+      pollVote: optionIndex,
+      pollRef: poll.pollId,
+      replyTo: replyTo,
+    );
+    await cache.upsertMessage(m);
+    await _enqueue(chat.id, 'send', {
+      'client_msg_id': clientMsgId,
+      'chat_id': chat.id,
+      'kind': 'pollVote',
+      'inner': inner,
+      if (replyTo != null) 'reply_to': replyTo,
+    });
+    return m;
+  }
+
   Future<void> enqueueDelete(String messageId, Chat chat) async {
     await _enqueue(chat.id, 'delete', {
       'message_id': messageId,
@@ -357,6 +436,9 @@ class SyncEngine {
         kind: row['kind'] as String? ?? 'text',
         text: inner.text,
         media: inner.media,
+        poll: inner.poll,
+        pollVote: inner.pollVote,
+        pollRef: inner.pollRef,
         replyTo: (row['reply_to'] ?? inner.replyTo) as String?,
         forwardedFrom:
             (row['forwarded_from'] ?? inner.forwardedFrom) as String?,

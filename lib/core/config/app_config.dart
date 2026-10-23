@@ -26,7 +26,7 @@ class AppConfig {
   static const String appId = 'com.drs.violetchat';
   // v0.1.2: تُعرض في الإعدادات («الإصدار …») — كانت عالقة على 0.1.0
   // في v0.1.1 (عيب عرض حقيقي مُصلَح الآن). تُرقّع مع pubspec.yaml.
-  static const String appVersion = '0.1.9';
+  static const String appVersion = '0.1.10';
 
   // ------------------------------------------------------------------
   // Backend (public values — safe for client bundles)

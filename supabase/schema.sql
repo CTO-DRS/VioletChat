@@ -245,7 +245,7 @@ create table if not exists public.messages (
   sender_id uuid not null references public.profiles(id) on delete cascade,
   sender_device_id text not null default '',
   client_msg_id text not null,
-  kind text not null default 'text' check (kind in ('text','media','system')),
+  kind text not null default 'text' check (kind in ('text','media','system','poll','pollVote')),
   body jsonb not null default '{}'::jsonb,
   reply_to uuid references public.messages(id) on delete set null,
   forwarded_from text,

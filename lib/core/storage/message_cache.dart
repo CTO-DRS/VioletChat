@@ -314,6 +314,9 @@ class MessageCache {
         'kind': m.kind,
         'text': m.text,
         'media_json': m.media == null ? null : jsonEncode(m.media!.toJson()),
+        // v0.1.10: poll body / ballot index ride the (previously unused)
+        // body_json column — no schema migration needed.
+        'body_json': _pollJson(m),
         'reply_to': m.replyTo,
         'reply_preview': m.replyPreview,
         'forwarded_from': m.forwardedFrom,
@@ -330,9 +333,40 @@ class MessageCache {
         'outgoing': (myId != null && m.senderId == myId) ? 1 : 0,
       };
 
+  /// v0.1.10: decrypted poll payloads for the local cache. The local
+  /// DB is already encrypted at rest (LocalDatabase seal), same trust
+  /// level as the rest of the cached message content.
+  String? _pollJson(Message m) {
+    if (m.poll != null) {
+      return jsonEncode({
+        'poll': m.poll!.toJson(),
+        if (m.pollVote != null) 'vote': m.pollVote,
+      });
+    }
+    if (m.pollVote != null || m.pollRef != null) {
+      return jsonEncode({
+        if (m.pollVote != null) 'vote': m.pollVote,
+        if (m.pollRef != null) 'ref': m.pollRef,
+      });
+    }
+    return null;
+  }
+
   Message? _fromRow(Map<String, Object?> r) {
     try {
       final mediaJson = r['media_json'] as String?;
+      final pollJson = r['body_json'] as String?;
+      PollInfo? poll;
+      int? pollVote;
+      String? pollRef;
+      if (pollJson != null && pollJson.isNotEmpty) {
+        try {
+          final j = jsonDecode(pollJson) as Map<String, dynamic>;
+          poll = PollInfo.fromJson(j['poll'] as Map<String, dynamic>?);
+          pollVote = (j['vote'] as num?)?.toInt();
+          pollRef = j['ref'] as String?;
+        } catch (_) {}
+      }
       return Message(
         id: r['id'] as String,
         chatId: r['chat_id'] as String,
@@ -344,6 +378,9 @@ class MessageCache {
         media: mediaJson == null
             ? null
             : MediaInfo.fromJson(jsonDecode(mediaJson) as Map<String, dynamic>),
+        poll: poll,
+        pollVote: pollVote,
+        pollRef: pollRef,
         replyTo: r['reply_to'] as String?,
         replyPreview: r['reply_preview'] as String?,
         forwardedFrom: r['forwarded_from'] as String?,
