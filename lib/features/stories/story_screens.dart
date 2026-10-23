@@ -511,7 +511,7 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
   }
 
   double get _storyDurationMs =>
-      _current?.story.content?.media != null ? 7000 : 5500;
+      _current?.$2.content?.media != null ? 7000 : 5500;
 
   (String, StoryItem)? get _current {
     final s = context.read<StoriesController>();
@@ -822,8 +822,9 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
                       subtitle: viewers[story.id]?[id] != null &&
                               viewers[story.id]![id]!.isNotEmpty
                           ? Text(SmartDate.listStamp(DateTime.tryParse(
-                                  viewers[story.id]![id]!)
-                              ?.toLocal()))
+                                      viewers[story.id]![id]!)
+                                  ?.toLocal() ??
+                              DateTime.now()))
                           : null,
                     )),
             ],

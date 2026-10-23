@@ -57,7 +57,10 @@ class StoriesController extends ChangeNotifier {
       ..sort((a, b) => b.newest.compareTo(a.newest));
     final meFirst = entries.where((e) => e.id == myId).toList();
     final rest = entries.where((e) => e.id != myId).toList();
-    return [...meFirst, ...rest.map((e) => e.id)];
+    return [
+      ...meFirst.map((e) => e.id),
+      ...rest.map((e) => e.id),
+    ];
   }
 
   bool get hasUnseen =>
@@ -74,7 +77,7 @@ class StoriesController extends ChangeNotifier {
     // Opportunistic refresh — stories live 24h; every 5 minutes while
     // the app is open is plenty (no realtime channel needed).
     _timer?.cancel();
-    _timer = Timer.periodic(const Duration(minutes: 5), () {
+    _timer = Timer.periodic(const Duration(minutes: 5), (_) {
       if (auth.signedIn) unawaited(refresh());
     });
   }

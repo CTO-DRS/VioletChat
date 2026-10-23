@@ -210,7 +210,7 @@ class StoryService {
         .eq('story_id', storyId)
         .eq('user_id', myId)
         .limit(10);
-    if ((wraps as List).isEmpty) {
+    if (wraps.isEmpty) {
       throw StateError('no wrap for me on story $storyId');
     }
 
