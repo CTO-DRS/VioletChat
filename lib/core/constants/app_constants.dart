@@ -15,6 +15,11 @@ class AppConstants {
   /// Hidden from the transcript; tallied client-side (last vote wins).
   static const String kindPollVote = 'pollVote';
 
+  /// v0.1.11: a reply to a friend's story, delivered INSIDE the direct
+  /// chat with the story author. The reply text + the story reference
+  /// travel INSIDE the ciphertext; the server sees just another row.
+  static const String kindStoryReply = 'storyReply';
+
   // Media subtypes (stored inside the encrypted payload)
   static const String mediaImage = 'image';
   static const String mediaAudio = 'audio';

@@ -11,6 +11,12 @@ import '../../data/models/models.dart';
 /// tally is computed on-device from the chat's synced ballots. Tapping
 /// an option casts (or changes) my vote — the bubble re-renders live
 /// because ballots arrive through the normal realtime pipeline.
+///
+/// v0.1.11 — long-press opens the message sheet (edit for the author
+/// while zero ballots have arrived; the server-side messages_guard
+/// already allows the sender to update body + edited_at, and the
+/// pollId inside the ciphertext never changes so existing ballots
+/// keep linking through pollRef). Edited polls show a «معدّلة» tag.
 class PollBubble extends StatelessWidget {
   final Message pollMsg;
   final bool mine;
@@ -18,6 +24,7 @@ class PollBubble extends StatelessWidget {
   final String myId;
   final double font;
   final void Function(int optionIndex) onVote;
+  final VoidCallback? onLongPress;
 
   const PollBubble({
     super.key,
@@ -27,6 +34,7 @@ class PollBubble extends StatelessWidget {
     required this.myId,
     required this.font,
     required this.onVote,
+    this.onLongPress,
   });
 
   @override
@@ -49,26 +57,36 @@ class PollBubble extends StatelessWidget {
     final voters = PollTally.totalVoters(tally);
     final fg = _fg(context);
 
-    return Container(
-      constraints: const BoxConstraints(maxWidth: 320),
-      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-      decoration: _deco(context),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          // ---------- header ----------
-          Row(
-            children: [
-              Icon(Icons.poll_rounded, size: 17, color: _accent(context)),
-              const SizedBox(width: 5),
-              Text('استطلاع رأي',
-                  style: TextStyle(
-                      fontSize: 11.5,
-                      fontWeight: FontWeight.w700,
-                      color: _accent(context))),
-            ],
-          ),
+    return GestureDetector(
+      onLongPress: onLongPress,
+      child: Container(
+        constraints: const BoxConstraints(maxWidth: 320),
+        padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+        decoration: _deco(context),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // ---------- header ----------
+            Row(
+              children: [
+                Icon(Icons.poll_rounded, size: 17, color: _accent(context)),
+                const SizedBox(width: 5),
+                Text('استطلاع رأي',
+                    style: TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w700,
+                        color: _accent(context))),
+                if (pollMsg.editedAt != null) ...[
+                  const SizedBox(width: 6),
+                  Text('معدّلة',
+                      style: TextStyle(
+                          fontSize: 10,
+                          fontStyle: FontStyle.italic,
+                          color: fg.withValues(alpha: 0.6))),
+                ],
+              ],
+            ),
           const SizedBox(height: 5),
           Text(
             poll.question,
@@ -97,7 +115,9 @@ class PollBubble extends StatelessWidget {
           // ---------- footer ----------
           Text(
             voters == 0
-                ? 'لا أصوات بعد — اضغط على خيار للتصويت'
+                ? (mine
+                    ? 'لا أصوات بعد — اضغط مطولاً للتعديل'
+                    : 'لا أصوات بعد — اضغط على خيار للتصويت')
                 : myVote == null
                     ? '$voters صوت — اضغط للتصويت'
                     : '$voters صوت — صوّتت، اضغط لخيار آخر للتغيير',
@@ -106,6 +126,7 @@ class PollBubble extends StatelessWidget {
                 color: fg.withValues(alpha: 0.65)),
           ),
         ],
+      ),
       ),
     );
   }
@@ -217,14 +238,23 @@ class _OptionRow extends StatelessWidget {
 
 /// v0.1.10 — create-poll sheet. Question + 2..12 options; publishes an
 /// encrypted poll through [onPublish] when validation passes.
+///
+/// v0.1.11 — the same sheet edits an existing poll: pass [initial]
+/// (the decrypted PollInfo) and [isEdit]; fields come pre-filled and
+/// the submit label changes. Validation is shared with creation via
+/// [PollForm.validate] (pure, unit-tested).
 Future<void> showPollComposerSheet(
   BuildContext context, {
   required void Function(String question, List<String> options) onPublish,
+  PollInfo? initial,
+  bool isEdit = false,
 }) async {
-  final questionCtrl = TextEditingController();
+  final questionCtrl = TextEditingController(text: initial?.question ?? '');
+  final seedOptions = (initial == null || initial.options.length < 2)
+      ? <String>['', '']
+      : initial.options;
   final optionCtrls = <TextEditingController>[
-    TextEditingController(),
-    TextEditingController(),
+    for (final o in seedOptions) TextEditingController(text: o),
   ];
 
   await showModalBottomSheet<void>(
@@ -244,7 +274,7 @@ Future<void> showPollComposerSheet(
               .map((c) => c.text.trim())
               .where((o) => o.isNotEmpty)
               .toList();
-          if (q.isEmpty || opts.length < 2) {
+          if (PollForm.validate(q, opts) != null) {
             HapticFeedback.heavyImpact();
             return;
           }
@@ -262,11 +292,14 @@ Future<void> showPollComposerSheet(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Text('استطلاع رأي مشفر',
+                  Text(isEdit ? 'تعديل الاستطلاع' : 'استطلاع رأي مشفر',
                       textAlign: TextAlign.center,
                       style: Theme.of(sheetCtx).textTheme.titleMedium),
                   const SizedBox(height: 4),
-                  Text('يُرسل السؤال والخيارات مشفرة طرف-لطرف',
+                  Text(
+                      isEdit
+                          ? 'يُحفظ السؤال والخيارات مشفرين — معرف الاستطلاع يبقى ثابتاً'
+                          : 'يُرسل السؤال والخيارات مشفرة طرف-لطرف',
                       textAlign: TextAlign.center,
                       style: Theme.of(sheetCtx).textTheme.bodySmall),
                   const SizedBox(height: 14),
@@ -322,8 +355,9 @@ Future<void> showPollComposerSheet(
                     style: FilledButton.styleFrom(
                       backgroundColor: AppTheme.brandPrimary,
                     ),
-                    icon: const Icon(Icons.poll_rounded, size: 19),
-                    label: const Text('نشر الاستطلاع'),
+                    icon: Icon(isEdit ? Icons.save_rounded : Icons.poll_rounded,
+                        size: 19),
+                    label: Text(isEdit ? 'حفظ التعديل' : 'نشر الاستطلاع'),
                   ),
                 ],
               ),
@@ -333,4 +367,19 @@ Future<void> showPollComposerSheet(
       },
     ),
   );
+}
+
+/// v0.1.11 — shared create/edit validation (pure). Returns an Arabic
+/// error message or null when the poll is publishable. Static so unit
+/// tests cover the exact rules the sheet enforces.
+class PollForm {
+  PollForm._();
+
+  static String? validate(String question, List<String> options) {
+    if (question.trim().isEmpty) return 'اكتب السؤال أولاً';
+    final opts =
+        options.map((o) => o.trim()).where((o) => o.isNotEmpty).toList();
+    if (opts.length < 2) return 'الخياران على الأقل مطلوبان';
+    return null;
+  }
 }

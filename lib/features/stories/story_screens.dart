@@ -1,12 +1,15 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
+import 'package:video_player/video_player.dart';
 
 import '../../theme/app_theme.dart';
+import '../../core/config/app_config.dart';
 import '../../core/utils/smart_date.dart';
 import '../../data/models/models.dart';
 import '../../services/story_service.dart' show StoryItem;
@@ -97,6 +100,14 @@ class _MyAvatar extends StatelessWidget {
       final latest = mine.last;
       final media = latest.content?.media;
       if (media != null) {
+        // v0.1.11: video stories have no cheap frame thumbnail — a
+        // distinct play glyph instead of pretending to have a preview.
+        if (media.type == 'video') {
+          return const ColoredBox(
+            color: Color(0xFF2A1B4A),
+            child: Icon(Icons.play_arrow_rounded, color: Colors.white70),
+          );
+        }
         return ClipOval(
           child: SizedBox(
             width: 52,
@@ -244,12 +255,33 @@ class _StoryComposerScreenState extends State<StoryComposerScreen> {
   final TextEditingController _text = TextEditingController();
   int _bg = 0;
   Uint8List? _image;
+
+  // v0.1.11 — video story: picked bytes + metadata read from the
+  // preview player. Setting one source clears the other.
+  Uint8List? _video;
+  String? _videoName;
+  int? _videoDurationMs;
+  int? _videoWidth;
+  int? _videoHeight;
+  VideoPlayerController? _previewCtrl;
   bool _busy = false;
 
   @override
   void dispose() {
     _text.dispose();
+    _previewCtrl?.dispose();
     super.dispose();
+  }
+
+  void _clearMedia() {
+    _previewCtrl?.dispose();
+    _previewCtrl = null;
+    _image = null;
+    _video = null;
+    _videoName = null;
+    _videoDurationMs = null;
+    _videoWidth = null;
+    _videoHeight = null;
   }
 
   Future<void> _pickImage() async {
@@ -259,7 +291,10 @@ class _StoryComposerScreenState extends State<StoryComposerScreen> {
           source: ImageSource.gallery, maxWidth: 1440, imageQuality: 82);
       if (picked == null) return;
       final bytes = await picked.readAsBytes();
-      setState(() => _image = bytes);
+      setState(() {
+        _clearMedia();
+        _image = bytes;
+      });
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -268,14 +303,112 @@ class _StoryComposerScreenState extends State<StoryComposerScreen> {
     }
   }
 
+  /// v0.1.11 — video story source: gallery pick or camera recording,
+  /// capped at 60 seconds by the picker and 50MB by us (same budget
+  /// as chat media; bigger videos are rejected with a clear message).
+  Future<void> _pickVideo({required ImageSource source}) async {
+    HapticFeedback.selectionClick();
+    try {
+      final picked = await ImagePicker().pickVideo(
+        source: source,
+        maxDuration: const Duration(seconds: 60),
+      );
+      if (picked == null) return;
+      final bytes = await picked.readAsBytes();
+      if (bytes.length > AppConfig.mediaMaxBytes) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+              content: Text('الفيديو أكبر من 50 ميجابايت — اختر مقطعاً أقصر')));
+        }
+        return;
+      }
+      setState(() {
+        _clearMedia();
+        _video = bytes;
+        _videoName = picked.name;
+      });
+      await _initPreview();
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('تعذر اختيار الفيديو')));
+      }
+    }
+  }
+
+  Future<void> _showVideoSourceSheet() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetCtx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.photo_library_rounded),
+              title: const Text('فيديو من المعرض'),
+              onTap: () {
+                Navigator.pop(sheetCtx);
+                _pickVideo(source: ImageSource.gallery);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.videocam_rounded),
+              title: const Text('تسجيل فيديو (حتى 60 ثانية)'),
+              onTap: () {
+                Navigator.pop(sheetCtx);
+                _pickVideo(source: ImageSource.camera);
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Muted looped preview of the picked video; also captures duration
+  /// and dimensions for the (encrypted) MediaInfo.
+  Future<void> _initPreview() async {
+    final v = _video;
+    if (v == null) return;
+    try {
+      final dir = await Directory.systemTemp.createTemp('violet_story_pick');
+      final file = File('${dir.path}/preview.mp4');
+      await file.writeAsBytes(v, flush: true);
+      final ctrl = VideoPlayerController.file(file);
+      await ctrl.initialize();
+      if (!mounted) {
+        await ctrl.dispose();
+        return;
+      }
+      await ctrl.setLooping(true);
+      await ctrl.setVolume(0);
+      unawaited(ctrl.play());
+      setState(() {
+        _previewCtrl = ctrl;
+        _videoDurationMs = ctrl.value.duration.inMilliseconds;
+        _videoWidth = ctrl.value.size.width.round();
+        _videoHeight = ctrl.value.size.height.round();
+      });
+    } catch (_) {
+      // Preview is cosmetic — publish still works without metadata.
+    }
+  }
+
   Future<void> _publish() async {
     if (_busy) return;
     final hasText = _text.text.trim().isNotEmpty;
-    if (!hasText && _image == null) return;
+    if (!hasText && _image == null && _video == null) return;
     setState(() => _busy = true);
     final ok = await context.read<StoriesController>().publish(
           text: hasText ? _text.text.trim() : null,
           imageBytes: _image,
+          videoBytes: _video,
+          videoMime: _video != null ? 'video/mp4' : null,
+          videoName: _videoName,
+          durationMs: _videoDurationMs,
+          width: _videoWidth,
+          height: _videoHeight,
         );
     if (!mounted) return;
     setState(() => _busy = false);
@@ -301,6 +434,11 @@ class _StoryComposerScreenState extends State<StoryComposerScreen> {
             icon: const Icon(Icons.photo_library_rounded),
             onPressed: _busy ? null : _pickImage,
           ),
+          IconButton(
+            tooltip: 'فيديو',
+            icon: const Icon(Icons.videocam_rounded),
+            onPressed: _busy ? null : _showVideoSourceSheet,
+          ),
         ],
       ),
       body: _busy
@@ -309,7 +447,7 @@ class _StoryComposerScreenState extends State<StoryComposerScreen> {
               children: [
                 Expanded(child: _canvas()),
                 // background swatches — text mode only
-                if (_image == null)
+                if (_image == null && _video == null)
                   SizedBox(
                     height: 56,
                     child: ListView(
@@ -360,7 +498,10 @@ class _StoryComposerScreenState extends State<StoryComposerScreen> {
                               prefixIcon: _image != null
                                   ? const Icon(Icons.image_rounded,
                                       color: Colors.white54)
-                                  : null,
+                                  : (_video != null
+                                      ? const Icon(Icons.videocam_rounded,
+                                          color: Colors.white54)
+                                      : null),
                               filled: true,
                               fillColor: Colors.white.withValues(alpha: 0.08),
                               border: OutlineInputBorder(
@@ -399,6 +540,55 @@ class _StoryComposerScreenState extends State<StoryComposerScreen> {
   }
 
   Widget _canvas() {
+    if (_video != null) {
+      final ctrl = _previewCtrl;
+      if (ctrl != null && ctrl.value.isInitialized) {
+        return Padding(
+          padding: const EdgeInsets.all(12),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(20),
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                const ColoredBox(color: Colors.black),
+                Center(
+                  child: AspectRatio(
+                    aspectRatio: ctrl.value.aspectRatio == 0
+                        ? 16 / 9
+                        : ctrl.value.aspectRatio,
+                    child: VideoPlayer(ctrl),
+                  ),
+                ),
+                PositionedDirectional(
+                  top: 10,
+                  end: 10,
+                  child: IconButton(
+                    tooltip: 'إزالة الفيديو',
+                    icon: const Icon(Icons.close_rounded,
+                        color: Colors.white),
+                    onPressed: () => setState(_clearMedia),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      }
+      return const ColoredBox(
+        color: Color(0xFF150C2E),
+        child: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.videocam_rounded, color: Colors.white54, size: 42),
+              SizedBox(height: 10),
+              Text('جاري تجهيز المعاينة…',
+                  style: TextStyle(color: Colors.white54)),
+            ],
+          ),
+        ),
+      );
+    }
     if (_image != null) {
       return Padding(
         padding: const EdgeInsets.all(12),
@@ -467,6 +657,26 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
   bool _paused = false;
   bool _jumped = false;
 
+  // v0.1.11 — video stories: each video page registers its player
+  // keyed by story id. During page transitions two pages can be alive
+  // at once — a plain single reference would race (the outgoing page's
+  // dispose would clear the incoming page's controller), so the tick
+  // always looks up the CURRENT story's controller instead.
+  final Map<String, VideoPlayerController> _videoCtrls = {};
+
+  VideoPlayerController? get _activeVideoCtrl {
+    final cur = _current?.$2;
+    return cur == null ? null : _videoCtrls[cur.id];
+  }
+
+  // v0.1.11 — reply to a friend's story, sent into the direct chat.
+  final TextEditingController _replyCtrl = TextEditingController();
+  final FocusNode _replyFocus = FocusNode();
+  bool _replySending = false;
+
+  bool get _replyActive => _replyFocus.hasFocus;
+  bool get _effectivePaused => _paused || _replyActive;
+
   List<(String author, StoryItem story)> _flat(StoriesController s) {
     final out = <(String, StoryItem)>[];
     for (final id in s.authorOrder) {
@@ -481,6 +691,40 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
   void initState() {
     super.initState();
     _startTick();
+    // Keyboard focus on the reply field pauses the story timer (and
+    // the video through didUpdateWidget on the next rebuild).
+    _replyFocus.addListener(() {
+      if (mounted) setState(() {});
+    });
+  }
+
+  void _setVideoPaused(bool p) {
+    final vc = _activeVideoCtrl;
+    if (vc != null && vc.value.isInitialized) {
+      try {
+        if (p) {
+          vc.pause();
+        } else {
+          vc.play();
+        }
+      } catch (_) {}
+    }
+  }
+
+  /// v0.1.11 — send the typed reply into the direct chat with the
+  /// story author (encrypted kind='storyReply' — see StoriesController).
+  Future<void> _sendReply(StoriesController s, StoryItem story) async {
+    final text = _replyCtrl.text.trim();
+    if (text.isEmpty || _replySending) return;
+    _replyCtrl.clear();
+    _replyFocus.unfocus();
+    setState(() => _replySending = true);
+    final ok = await s.replyToStory(story, text);
+    if (!mounted) return;
+    setState(() => _replySending = false);
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(ok ? 'أُرسل ردك في المحادثة ✓' : 'تعذر إرسال الرد'),
+    ));
   }
 
   void _jumpToInitial(List<(String, StoryItem)> flat) {
@@ -501,7 +745,28 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
   void _startTick() {
     _tick?.cancel();
     _tick = Timer.periodic(const Duration(milliseconds: 60), (t) {
-      if (!mounted || _paused) return;
+      if (!mounted || _effectivePaused) return;
+
+      // v0.1.11 — video story: hold still until ITS player is ready
+      // (download+decrypt can take longer than any fixed timer; a
+      // timer here would skip the story), then follow the position.
+      final cur = _current?.$2;
+      final isVideo = cur?.content?.media?.type == 'video';
+      final vc = _activeVideoCtrl;
+      if (isVideo && (vc == null || !vc.value.isInitialized)) return;
+      if (vc != null) {
+        final dur = vc.value.duration.inMilliseconds;
+        final pos = vc.value.position.inMilliseconds;
+        if (dur > 0) {
+          setState(() => _progress = pos / dur);
+          if (!vc.value.isPlaying && pos >= dur - 60) {
+            _progress = 0;
+            _advance();
+          }
+        }
+        return;
+      }
+
       setState(() => _progress += 60 / _storyDurationMs);
       if (_progress >= 1) {
         _progress = 0;
@@ -547,6 +812,11 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
   void dispose() {
     _tick?.cancel();
     _page.dispose();
+    // Controllers belong to their page widgets — the framework
+    // disposes them; this only drops the registry.
+    _videoCtrls.clear();
+    _replyCtrl.dispose();
+    _replyFocus.dispose();
     super.dispose();
   }
 
@@ -584,10 +854,18 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
               flat.where((e) => e.$1 == entry.$1).toList();
           final segIdx = authorGroup.indexWhere((e) => e.$2.id == entry.$2.id);
           final profiles = s.profileCache;
+          final isMineStory = entry.$1 == s.myId;
 
           return GestureDetector(
             behavior: HitTestBehavior.opaque,
             onTapDown: (d) {
+              // v0.1.11: the reply bar owns its taps — never advance
+              // while the user is reaching for/using the reply field.
+              if (!isMineStory) {
+                if (_replyActive) return;
+                final h = MediaQuery.of(context).size.height;
+                if (d.globalPosition.dy > h - 110) return;
+              }
               final w = MediaQuery.of(context).size.width;
               _progress = 0;
               if (d.globalPosition.dx > w / 2) {
@@ -596,8 +874,16 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
                 _rewind();
               }
             },
-            onLongPressStart: (_) => _paused = true,
-            onLongPressEnd: (_) => _paused = false,
+            onLongPressStart: (_) {
+              _paused = true;
+              _setVideoPaused(true);
+            },
+            onLongPressEnd: (_) {
+              if (!_replyActive) {
+                _paused = false;
+                _setVideoPaused(false);
+              }
+            },
             onVerticalDragEnd: (d) {
               if ((d.primaryVelocity ?? 0) > 120) {
                 Navigator.of(context).maybePop();
@@ -607,7 +893,17 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
               fit: StackFit.expand,
               children: [
                 // ---------- content ----------
-                _StoryBody(story: entry.$2),
+                _StoryBody(
+                  story: entry.$2,
+                  paused: _effectivePaused,
+                  onVideoController: (storyId, c) {
+                    if (c == null) {
+                      _videoCtrls.remove(storyId);
+                    } else {
+                      _videoCtrls[storyId] = c;
+                    }
+                  },
+                ),
                 // ---------- top chrome ----------
                 SafeArea(
                   child: Column(
@@ -710,10 +1006,8 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
                     top: false,
                     child: Padding(
                       padding: const EdgeInsets.all(14),
-                      child: Row(
-                        children: [
-                          if (entry.$1 == s.myId)
-                            InkWell(
+                      child: entry.$1 == s.myId
+                          ? InkWell(
                               borderRadius: BorderRadius.circular(22),
                               onTap: () => _showViewers(context, s, entry.$2),
                               child: Container(
@@ -739,10 +1033,68 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
                                 ),
                               ),
                             )
-                          else
-                            const SizedBox.shrink(),
-                        ],
-                      ),
+                          // v0.1.11 — reply bar: an encrypted reply
+                          // lands in the direct chat with the author.
+                          : Row(
+                              children: [
+                                Expanded(
+                                  child: TextField(
+                                    controller: _replyCtrl,
+                                    focusNode: _replyFocus,
+                                    style: const TextStyle(
+                                        color: Colors.white, fontSize: 14),
+                                    textInputAction: TextInputAction.send,
+                                    onSubmitted: (_) =>
+                                        _sendReply(s, entry.$2),
+                                    decoration: InputDecoration(
+                                      hintText: 'أرسل رداً…',
+                                      hintStyle: TextStyle(
+                                          color: Colors.white
+                                              .withValues(alpha: 0.5)),
+                                      filled: true,
+                                      fillColor: Colors.white
+                                          .withValues(alpha: 0.10),
+                                      contentPadding:
+                                          const EdgeInsets.symmetric(
+                                              horizontal: 16, vertical: 10),
+                                      border: OutlineInputBorder(
+                                        borderRadius:
+                                            BorderRadius.circular(24),
+                                        borderSide: BorderSide.none,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                InkWell(
+                                  onTap: _replySending
+                                      ? null
+                                      : () => _sendReply(s, entry.$2),
+                                  borderRadius: BorderRadius.circular(22),
+                                  child: Container(
+                                    width: 44,
+                                    height: 44,
+                                    decoration: BoxDecoration(
+                                      gradient: AppTheme.brandGradient,
+                                      shape: BoxShape.circle,
+                                      boxShadow: AppTheme.glow(
+                                          color: AppTheme.brandPrimary,
+                                          alpha: 0.35,
+                                          blur: 10),
+                                    ),
+                                    child: _replySending
+                                        ? const Padding(
+                                            padding: EdgeInsets.all(12),
+                                            child: CircularProgressIndicator(
+                                                strokeWidth: 2,
+                                                color: Colors.white),
+                                          )
+                                        : const Icon(Icons.send_rounded,
+                                            color: Colors.white, size: 20),
+                                  ),
+                                ),
+                              ],
+                            ),
                     ),
                   ),
                 ),
@@ -784,6 +1136,7 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
   Future<void> _showViewers(
       BuildContext context, StoriesController s, StoryItem story) async {
     _paused = true;
+    _setVideoPaused(true);
     final viewers = await s.myViewers();
     final ids = viewers[story.id]?.keys.toSet() ?? <String>{};
     final profiles = await s.profilesOf(ids);
@@ -832,16 +1185,28 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
         ),
       ),
     );
-    if (mounted) _paused = false;
+    if (mounted) {
+      _paused = false;
+      if (!_replyActive) _setVideoPaused(false);
+    }
   }
 }
 
-/// Decrypts and renders one story: image full-bleed (MediaService
-/// cache) or a colored text status.
+/// Decrypts and renders one story: video (v0.1.11), image full-bleed
+/// (MediaService cache) or a colored text status. [paused] + the video
+/// controller callback keep the viewer's progress ring in sync with
+/// the actual playback instead of a fixed timer.
 class _StoryBody extends StatelessWidget {
   final StoryItem story;
+  final bool paused;
+  final void Function(String storyId, VideoPlayerController?)
+      onVideoController;
 
-  const _StoryBody({required this.story});
+  const _StoryBody({
+    required this.story,
+    required this.paused,
+    required this.onVideoController,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -857,6 +1222,18 @@ class _StoryBody extends StatelessWidget {
     }
     final media = content.media;
     if (media != null) {
+      if (media.type == 'video') {
+        return _VideoStoryBody(
+          // Keyed by story id: paging to the next story tears the old
+          // player down (dispose clears its registry entry) and builds
+          // a fresh one for the new row.
+          key: ValueKey('story-video-${story.id}'),
+          media: media,
+          caption: content.text,
+          paused: paused,
+          onController: (c) => onVideoController(story.id, c),
+        );
+      }
       return FutureBuilder<Uint8List?>(
         future: AppServices.I.mediaService.downloadDecrypted(
           path: media.path,
@@ -925,6 +1302,142 @@ class _StoryBody extends StatelessWidget {
                 height: 1.5),
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// v0.1.11 — one encrypted video story: decrypt-once to a private temp
+/// file (same pipeline as chat video), play with the OS player plugin.
+/// Taps still belong to the viewer (advance/rewind); long-press and
+/// the reply field pause playback through [paused]. Any failure shows
+/// a graceful error instead of breaking the ring.
+class _VideoStoryBody extends StatefulWidget {
+  final MediaInfo media;
+  final String? caption;
+  final bool paused;
+  final void Function(VideoPlayerController?) onController;
+
+  const _VideoStoryBody({
+    super.key,
+    required this.media,
+    required this.caption,
+    required this.paused,
+    required this.onController,
+  });
+
+  @override
+  State<_VideoStoryBody> createState() => _VideoStoryBodyState();
+}
+
+class _VideoStoryBodyState extends State<_VideoStoryBody> {
+  VideoPlayerController? _ctrl;
+  bool _failed = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _prepare();
+  }
+
+  Future<void> _prepare() async {
+    try {
+      final m = widget.media;
+      final bytes = await AppServices.I.mediaService.downloadDecrypted(
+        path: m.path,
+        fileKeyB64: m.fileKey,
+        fileNonceB64: m.fileNonce,
+      );
+      final dir = await Directory.systemTemp.createTemp('violet_story_video');
+      final file = File('${dir.path}/story.mp4');
+      await file.writeAsBytes(bytes, flush: true);
+      final ctrl = VideoPlayerController.file(file);
+      await ctrl.initialize();
+      if (!mounted) {
+        await ctrl.dispose();
+        return;
+      }
+      widget.onController(ctrl);
+      setState(() => _ctrl = ctrl);
+      if (!widget.paused) {
+        unawaited(ctrl.play());
+      }
+    } catch (_) {
+      if (mounted) setState(() => _failed = true);
+    }
+  }
+
+  @override
+  void didUpdateWidget(_VideoStoryBody old) {
+    super.didUpdateWidget(old);
+    if (widget.paused != old.paused) {
+      final c = _ctrl;
+      if (c != null && c.value.isInitialized) {
+        try {
+          if (widget.paused) {
+            c.pause();
+          } else {
+            c.play();
+          }
+        } catch (_) {}
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.onController(null);
+    _ctrl?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_failed) {
+      return const ColoredBox(
+        color: Colors.black,
+        child: Center(
+          child: Text('تعذر تشغيل الفيديو',
+              style: TextStyle(color: Colors.white70)),
+        ),
+      );
+    }
+    final ctrl = _ctrl;
+    if (ctrl == null || !ctrl.value.isInitialized) {
+      return const ColoredBox(
+        color: Colors.black,
+        child: Center(child: CircularProgressIndicator()),
+      );
+    }
+    return ColoredBox(
+      color: Colors.black,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          Center(
+            child: AspectRatio(
+              aspectRatio:
+                  ctrl.value.aspectRatio == 0 ? 16 / 9 : ctrl.value.aspectRatio,
+              child: VideoPlayer(ctrl),
+            ),
+          ),
+          if (widget.caption != null && widget.caption!.isNotEmpty)
+            Align(
+              alignment: AlignmentDirectional.bottomCenter,
+              child: Container(
+                margin: const EdgeInsets.only(bottom: 90),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.45),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Text(widget.caption!,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(color: Colors.white, fontSize: 16)),
+              ),
+            ),
+        ],
       ),
     );
   }

@@ -170,6 +170,11 @@ class _ChatsScreenState extends State<ChatsScreen>
   String _previewText(Message? m) {
     if (m == null) return 'ابدأ المحادثة المشفرة 👋';
     if (!m.decrypted) return '🔒 رسالة مشفرة';
+    // v0.1.11: story replies announce themselves in the list too.
+    if (m.kind == AppConstants.kindStoryReply) {
+      final t = (m.text ?? '').trim();
+      return t.isEmpty ? '↩ رد على حالة' : '↩ $t';
+    }
     if (m.kind == AppConstants.kindMedia && m.media != null) {
       switch (m.media!.type) {
         case AppConstants.mediaImage:

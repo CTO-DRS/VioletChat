@@ -147,14 +147,21 @@ class StoriesController extends ChangeNotifier {
   }
 
   /// Text status (imageBytes null) or an encrypted image story.
+  /// v0.1.11: videoBytes != null => an encrypted VIDEO story (60s cap
+  /// enforced by the picker, 50MB by the uploader).
   Future<bool> publish({
     String? text,
     Uint8List? imageBytes,
     int? width,
     int? height,
+    Uint8List? videoBytes,
+    String? videoMime,
+    String? videoName,
+    int? durationMs,
   }) async {
     if (!auth.signedIn) return false;
-    if ((text == null || text.trim().isEmpty) && imageBytes == null) {
+    final hasMedia = imageBytes != null || videoBytes != null;
+    if ((text == null || text.trim().isEmpty) && !hasMedia) {
       return false;
     }
     try {
@@ -169,12 +176,43 @@ class StoriesController extends ChangeNotifier {
         imageBytes: imageBytes,
         width: width,
         height: height,
+        videoBytes: videoBytes,
+        videoMime: videoMime,
+        videoName: videoName,
+        durationMs: durationMs,
       );
       (byAuthor[myId] ??= []).add(item);
       notifyListeners();
       return true;
     } catch (e) {
       AppLogger.w('stories', 'publish failed', e);
+      return false;
+    }
+  }
+
+  /// v0.1.11 — reply to a friend's story from the viewer: an encrypted
+  /// kind='storyReply' message lands in the DIRECT chat with the story
+  /// author (stories are only visible to direct friends, so that chat
+  /// exists by definition — the same friend definition the server RLS
+  /// enforces). Returns false when the chat is missing or send fails.
+  Future<bool> replyToStory(StoryItem story, String text) async {
+    final t = text.trim();
+    if (t.isEmpty || story.authorId == myId) return false;
+    try {
+      final chats = await services.cache.chats();
+      Chat? dm;
+      for (final c in chats) {
+        if (!c.isGroup && c.peer?.id == story.authorId) {
+          dm = c;
+          break;
+        }
+      }
+      if (dm == null) return false;
+      await services.sync.enqueueStoryReply(dm, story.id, t);
+      await services.sync.drain();
+      return true;
+    } catch (e) {
+      AppLogger.w('stories', 'story reply failed', e);
       return false;
     }
   }

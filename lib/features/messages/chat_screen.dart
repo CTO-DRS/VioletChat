@@ -21,6 +21,7 @@ import '../../core/constants/app_constants.dart';
 import '../../core/errors/app_exception.dart';
 import '../../core/storage/local_database.dart';
 import '../../core/utils/disappearing_policy.dart';
+import '../../core/utils/poll_tally.dart';
 import '../../core/utils/smart_date.dart';
 import '../../data/models/models.dart';
 import '../../routing/app_router.dart';
@@ -642,7 +643,18 @@ class _ChatScreenState extends State<ChatScreen> {
     final c = _c;
     final mine = m.senderId == c.myId;
     final hasText = (m.text ?? '').trim().isNotEmpty && !m.isDeletedForAll;
-    final canEdit = mine && m.kind == 'text' && hasText;
+    // v0.1.11: polls are editable by the author — but ONLY while the
+    // tally shows zero ballots (option indices must not drift under
+    // existing votes) and once the row exists on the server (an edit
+    // action against a provisional placeholder id would loop-retry).
+    // Text messages keep the classic rule.
+    final pollEditable = mine &&
+        m.kind == AppConstants.kindPoll &&
+        m.poll != null &&
+        !m.isDeletedForAll &&
+        !m.isMinePlaceholder &&
+        PollTally.totalVoters(PollTally.tally(m, c.messages)) == 0;
+    final canEdit = (mine && m.kind == 'text' && hasText) || pollEditable;
 
     // v0.1.0: medium tactile thump announcing the long-press sheet.
     HapticFeedback.mediumImpact();
@@ -688,7 +700,11 @@ class _ChatScreenState extends State<ChatScreen> {
             if (canEdit)
               _sheetTile(Icons.edit, 'تعديل', () {
                 Navigator.pop(sheetCtx);
-                _editMessage(m);
+                if (m.kind == AppConstants.kindPoll) {
+                  _editPoll(m);
+                } else {
+                  _editMessage(m);
+                }
               }),
             _sheetTile(Icons.push_pin, 'تثبيت', () {
               Navigator.pop(sheetCtx);
@@ -787,6 +803,20 @@ class _ChatScreenState extends State<ChatScreen> {
     } catch (_) {
       _err('تعذر تعديل الرسالة');
     }
+  }
+
+  /// v0.1.11 — edit an encrypted poll: the same composer sheet, opened
+  /// pre-filled; on save the whole PollInfo is re-encrypted through the
+  /// normal edit outbox path (pollId unchanged → ballots stay linked).
+  Future<void> _editPoll(Message m) async {
+    final poll = m.poll;
+    if (poll == null) return;
+    showPollComposerSheet(
+      context,
+      initial: poll,
+      isEdit: true,
+      onPublish: (q, opts) => _c.editPoll(m, q, opts),
+    );
   }
 
   void _receiptsDialog(Message m) {
@@ -1387,6 +1417,9 @@ class _ChatScreenState extends State<ChatScreen> {
             myId: _c.myId,
             font: _chatFont.toDouble(),
             onVote: (i) => _c.castVote(m, i),
+            // v0.1.11: long-press opens the generic sheet — the edit
+            // tile appears there for the author while votes == 0.
+            onLongPress: m.isDeletedForAll ? null : () => _msgSheet(m),
           )
         : _bubble(m, mine);
     final highlighted = _highlightId == m.id;
@@ -1548,6 +1581,36 @@ class _ChatScreenState extends State<ChatScreen> {
             else ...[
               if (m.replyTo != null) _replyChip(m, mine),
               _mediaContent(m, mine),
+              // v0.1.11: story replies announce themselves — the reply
+              // text rides INSIDE the ciphertext with the story link.
+              if (m.kind == AppConstants.kindStoryReply)
+                Padding(
+                  padding: const EdgeInsetsDirectional.only(bottom: 4),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.auto_awesome_rounded,
+                          size: 13,
+                          color: mine
+                              ? Colors.white70
+                              : AppTheme.brandSecondary),
+                      const SizedBox(width: 4),
+                      Text(
+                        'رد على حالة',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontStyle: FontStyle.italic,
+                          color: mine
+                              ? Colors.white70
+                              : Theme.of(context)
+                                  .textTheme
+                                  .bodySmall
+                                  ?.color,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               if ((m.text ?? '').trim().isNotEmpty && m.kind == 'media')
                 Padding(
                   padding: const EdgeInsetsDirectional.only(top: 5),
@@ -1561,7 +1624,9 @@ class _ChatScreenState extends State<ChatScreen> {
                             : Theme.of(context).colorScheme.onSurface),
                   ),
                 ),
-              if ((m.text ?? '').trim().isNotEmpty && m.kind == 'text')
+              if ((m.text ?? '').trim().isNotEmpty &&
+                  (m.kind == 'text' ||
+                      m.kind == AppConstants.kindStoryReply))
                 SelectableText(
                   m.text!,
                   textAlign: TextAlign.right,

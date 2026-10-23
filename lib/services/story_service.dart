@@ -48,12 +48,19 @@ class StoryService {
 
   /// Publish a story for [friendIds] (direct-chat peers). [imageBytes]
   /// null => text status; else an encrypted image story with caption.
+  /// v0.1.11: [videoBytes] instead of image => an encrypted VIDEO story
+  /// (same per-story key, same storage RLS — only the MediaInfo type
+  /// differs, and the viewer plays it through the OS video player).
   Future<StoryItem> publish({
     required List<String> friendIds,
     String? text,
     Uint8List? imageBytes,
     int? width,
     int? height,
+    Uint8List? videoBytes,
+    String? videoMime,
+    String? videoName,
+    int? durationMs,
   }) async {
     MediaInfo? mediaInfo;
     if (imageBytes != null) {
@@ -67,6 +74,25 @@ class StoryService {
         mime: 'image/jpeg',
         width: width,
         height: height,
+        fileKey: Primitives.b64(fileKey),
+        fileNonce: Primitives.b64(nonce),
+      );
+    } else if (videoBytes != null) {
+      final fileKey = Primitives.randomBytes(32);
+      final (nonce, encrypted) =
+          await Primitives.sealRandom(videoBytes, fileKey);
+      final path = await media.uploadStory(encrypted);
+      mediaInfo = MediaInfo(
+        type: 'video',
+        path: path,
+        size: videoBytes.length,
+        mime: (videoMime == null || videoMime.isEmpty)
+            ? 'video/mp4'
+            : videoMime,
+        name: videoName,
+        width: width,
+        height: height,
+        durationMs: durationMs,
         fileKey: Primitives.b64(fileKey),
         fileNonce: Primitives.b64(nonce),
       );

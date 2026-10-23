@@ -21,6 +21,7 @@ import 'package:violet_chat/features/admin/admin_panel_screen.dart';
 import 'package:violet_chat/features/auth/auth_screen.dart';
 import 'package:violet_chat/features/calls/call_screen.dart';
 import 'package:violet_chat/features/calls/group_call_screen.dart';
+import 'package:violet_chat/features/stories/story_screens.dart';
 import 'package:violet_chat/routing/app_router.dart';
 import 'package:violet_chat/theme/app_theme.dart';
 
@@ -42,6 +43,10 @@ void main() {
     expect(AuthScreen, isNotNull);
     expect(CallScreen, isNotNull);
     expect(GroupCallScreen, isNotNull);
+    // v0.1.11: مساحات الحالات تدخل نطاق الترجمة الإلزامية — معظم
+    // منطق الفيديو/الردود يعيش هنا (درس بناء v0.1.2).
+    expect(StoryComposerScreen, isNotNull);
+    expect(StoryViewerScreen, isNotNull);
     expect(AppRoutes.chats, isNotEmpty);
     expect(AppRoutes.newChat, isNotEmpty); // v0.1.7 المسار الجديد
     expect(AppTheme.dark(), isNotNull);

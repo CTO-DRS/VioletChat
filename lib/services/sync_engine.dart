@@ -221,6 +221,38 @@ class SyncEngine {
     return m;
   }
 
+  /// v0.1.11 — reply to a friend's story, delivered INSIDE the direct
+  /// chat with the story author (kind='storyReply'). Reply text + the
+  /// referenced story id travel INSIDE the ciphertext; no plaintext
+  /// reply_to is set (the story is not a message row — FK safety).
+  Future<Message> enqueueStoryReply(
+      Chat chat, String storyId, String text) async {
+    final clientMsgId = _uuid();
+    final inner = {
+      'kind': 'storyReply',
+      'text': text,
+      'storyRef': storyId,
+    };
+    final m = Message.placeholder(
+      clientMsgId: clientMsgId,
+      chatId: chat.id,
+      senderId: auth.userId!,
+      senderDeviceId: crypto.identity.deviceId,
+      text: text,
+      media: null,
+      kind: 'storyReply',
+      storyRef: storyId,
+    );
+    await cache.upsertMessage(m);
+    await _enqueue(chat.id, 'send', {
+      'client_msg_id': clientMsgId,
+      'chat_id': chat.id,
+      'kind': 'storyReply',
+      'inner': inner,
+    });
+    return m;
+  }
+
   Future<void> enqueueDelete(String messageId, Chat chat) async {
     await _enqueue(chat.id, 'delete', {
       'message_id': messageId,
@@ -284,8 +316,19 @@ class SyncEngine {
                   await _chatOf(payloadJson['chat_id'] as String), inner);
               await messages.editMessage(
                   payloadJson['message_id'] as String, body);
-              await cache.applyEdit(payloadJson['message_id'] as String,
-                  inner['text'] as String?);
+              // v0.1.11: poll edits re-encrypt the whole PollInfo — the
+              // cached poll body must be replaced, not just the text.
+              if (inner['kind'] == 'poll' && inner['poll'] is Map) {
+                final p = PollInfo.fromJson(
+                    (inner['poll'] as Map).cast<String, dynamic>());
+                if (p != null) {
+                  await cache.applyPollEdit(
+                      payloadJson['message_id'] as String, p);
+                }
+              } else {
+                await cache.applyEdit(payloadJson['message_id'] as String,
+                    inner['text'] as String?);
+              }
               break;
             case 'delete':
               await messages
@@ -439,6 +482,7 @@ class SyncEngine {
         poll: inner.poll,
         pollVote: inner.pollVote,
         pollRef: inner.pollRef,
+        storyRef: inner.storyRef,
         replyTo: (row['reply_to'] ?? inner.replyTo) as String?,
         forwardedFrom:
             (row['forwarded_from'] ?? inner.forwardedFrom) as String?,

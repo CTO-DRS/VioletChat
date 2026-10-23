@@ -219,6 +219,10 @@ class InnerPayload {
   /// creator's PollInfo.pollId, inside the ciphertext.
   final String? pollRef;
 
+  /// v0.1.11: referenced story id (kind == 'storyReply'), inside the
+  /// ciphertext. The reply text is [text].
+  final String? storyRef;
+
   /// v0.1.0: original message id when this row arrived by forwarding.
   /// Rides INSIDE the ciphertext (E2E metadata) and is mirrored in the
   /// plaintext forwarded_from column, exactly like replyTo.
@@ -232,6 +236,7 @@ class InnerPayload {
     this.poll,
     this.pollVote,
     this.pollRef,
+    this.storyRef,
     this.replyTo,
     this.forwardedFrom,
     this.decrypted = true,
@@ -244,6 +249,7 @@ class InnerPayload {
         poll: PollInfo.fromJson(j['poll'] as Map<String, dynamic>?),
         pollVote: (j['vote'] as num?)?.toInt(),
         pollRef: j['pollRef'] as String?,
+        storyRef: j['storyRef'] as String?,
         replyTo: j['replyTo'] as String?,
         forwardedFrom: j['forwardedFrom'] as String?,
       );
@@ -255,6 +261,7 @@ class InnerPayload {
         if (poll != null) 'poll': poll!.toJson(),
         if (pollVote != null) 'vote': pollVote,
         if (pollRef != null) 'pollRef': pollRef,
+        if (storyRef != null) 'storyRef': storyRef,
         if (replyTo != null) 'replyTo': replyTo,
         if (forwardedFrom != null) 'forwardedFrom': forwardedFrom,
       };

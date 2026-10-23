@@ -380,6 +380,12 @@ class Message {
   /// inside the ciphertext); reply_to duplicates it in plaintext only
   /// when the poll row id is already known (FK-safe).
   final String? pollRef;
+
+  /// v0.1.11: story linkage for kind='storyReply' — the referenced
+  /// story's public row id, INSIDE the ciphertext (the server never
+  /// sees it). Rendered as a «رد على حالة» chip on the bubble; tapping
+  /// it re-opens the story while it is still live.
+  final String? storyRef;
   final String? replyTo;
   final String? replyPreview;
 
@@ -415,6 +421,7 @@ class Message {
     this.poll,
     this.pollVote,
     this.pollRef,
+    this.storyRef,
     this.replyTo,
     this.replyPreview,
     this.forwardedFrom,
@@ -443,6 +450,7 @@ class Message {
     PollInfo? poll,
     int? pollVote,
     String? pollRef,
+    String? storyRef,
   }) =>
       Message(
         id: clientMsgId, // provisional id until server confirms
@@ -456,6 +464,7 @@ class Message {
         poll: poll,
         pollVote: pollVote,
         pollRef: pollRef,
+        storyRef: storyRef,
         replyTo: replyTo,
         replyPreview: replyPreview,
         createdAt: DateTime.now().toUtc().toIso8601String(),
@@ -478,6 +487,7 @@ class Message {
     PollInfo? poll,
     int? pollVote,
     String? pollRef,
+    String? storyRef,
   }) =>
       Message(
         id: id,
@@ -491,6 +501,7 @@ class Message {
         poll: poll ?? this.poll,
         pollVote: pollVote ?? this.pollVote,
         pollRef: pollRef ?? this.pollRef,
+        storyRef: storyRef ?? this.storyRef,
         replyTo: replyTo,
         replyPreview: replyPreview,
         forwardedFrom: forwardedFrom ?? this.forwardedFrom,

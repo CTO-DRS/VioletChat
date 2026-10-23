@@ -9,9 +9,10 @@ Flutter + Firebase Authentication + Cloud Firestore + Supabase (نقل
 > قائم (DRS NEXORA سابقاً) — بلا حذف أي ميزة قائمة. منذ **v0.1.2**
 > هوية الحزمة هي `com.drs.violetchat` مطابقةً لتسجيل Firebase الرسمي
 > (مشروع `violetchat-cea68` — ووثّق أثر ذلك على التثبيت في
-> CHANGELOG v0.1.2). الإصدار الحالي: **v0.1.10** (versionCode 17) —
-> «استطلاعات وحالات»: استطلاعات رأي مشفرة طرف-لطرف وحالات/ستوري
-> مشفرة للأصدقاء بصلاحية 24 ساعة.
+> CHANGELOG v0.1.2). الإصدار الحالي: **v0.1.11** (versionCode 18) —
+> «تحسينات الاستطلاعات والحالات»: تعديل رسائل الاستطلاع، ردود على
+> الحالات تصل كرسائل مشفرة في محادثة المؤلف، وحالات فيديو حتى 60
+> ثانية — كلها فوق دفعة v0.1.10 (استطلاعات + حالات نص/صورة).
 
 ---
 
@@ -29,7 +30,10 @@ Flutter + Firebase Authentication + Cloud Firestore + Supabase (نقل
 | المجموعات + تدوير المفاتيح | IMPLEMENTED — NOT VERIFIED ميدانياً |
 | رسائل نصية + وسائط مشفرة | IMPLEMENTED — NOT VERIFIED ميدانياً |
 | استطلاعات رأي مشفرة (سؤال/خيارات/أصوات داخل التشفير) | IMPLEMENTED (v0.1.10) — NOT VERIFIED ميدانياً |
+| تعديل رسائل الاستطلاع (المؤلف، بلا أصوات بعد) | IMPLEMENTED (v0.1.11) — NOT VERIFIED ميدانياً |
 | حالات/ستوري مشفرة للأصدقاء (24 ساعة، نص+صورة، مشاهدون) | IMPLEMENTED (v0.1.10) — NOT VERIFIED ميدانياً |
+| حالات فيديو (حتى 60 ثانية، مشفرة كأي حالة) | IMPLEMENTED (v0.1.11) — NOT VERIFIED ميدانياً |
+| ردود على الحالات (رسالة مشفرة في محادثة المؤلف) | IMPLEMENTED (v0.1.11) — NOT VERIFIED ميدانياً |
 | مكالمات WebRTC ثنائية + جماعية (mesh ≤ 8) | IMPLEMENTED — NOT VERIFIED ميدانياً |
 | أوفلاين + مزامنة | IMPLEMENTED — NOT VERIFIED ميدانياً |
 | Realtime + مؤشر الكتابة + حضور «متصل الآن» | IMPLEMENTED — NOT VERIFIED ميدانياً |

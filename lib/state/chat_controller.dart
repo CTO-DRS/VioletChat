@@ -392,6 +392,41 @@ class ChatController extends ChangeNotifier {
     }
   }
 
+  /// v0.1.11 — edit my own poll (question + options). The caller (chat
+  /// screen) only offers this while the tally shows ZERO ballots, so
+  /// option indices can never drift under existing votes. The PollInfo
+  /// pollId stays IDENTICAL — ballots keep linking via pollRef; the
+  /// server PATCH re-encrypts the body through the normal edit path
+  /// (messages_guard: sender-only body/edited_at updates).
+  Future<void> editPoll(Message m, String question, List<String> options) async {
+    final poll = m.poll;
+    if (poll == null) return;
+    if (question.trim().isEmpty || options.length < 2) return;
+    final updated = PollInfo(
+      pollId: poll.pollId,
+      question: question.trim(),
+      options: options
+          .map((o) => o.trim())
+          .where((o) => o.isNotEmpty)
+          .toList(),
+      multi: poll.multi,
+    );
+    await services.cache.applyPollEdit(m.id, updated);
+    messages = messages
+        .map((x) => x.id == m.id || x.clientMsgId == m.id
+            ? x.copyWith(
+                poll: updated,
+                editedAt: m.editedAt ??
+                    DateTime.now().toUtc().toIso8601String())
+            : x)
+        .toList();
+    notifyListeners();
+    await services.sync.enqueueEdit(m.id, chat, {
+      'kind': 'poll',
+      'poll': updated.toJson(),
+    });
+  }
+
   Future<void> editMessage(Message m, String newText) async {
     await services.cache.applyEdit(m.id, newText);
     messages = messages

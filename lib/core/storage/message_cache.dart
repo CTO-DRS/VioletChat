@@ -73,6 +73,23 @@ class MessageCache {
     );
   }
 
+  /// v0.1.11 — replace a cached poll body after an edit (question,
+  /// options) + stamp edited_at. The pollId is untouched, so existing
+  /// ballots keep counting (PollTally links via pollRef).
+  Future<void> applyPollEdit(String messageId, PollInfo poll) async {
+    final db = await LocalDatabase.instance;
+    await db.update(
+      'messages_cache',
+      {
+        'text': poll.question,
+        'body_json': jsonEncode({'poll': poll.toJson()}),
+        'edited_at': DateTime.now().toUtc().toIso8601String(),
+      },
+      where: 'id = ? OR client_msg_id = ?',
+      whereArgs: [messageId, messageId],
+    );
+  }
+
   /// Cursor pagination — [beforeIso] null => latest page.
   /// Returns ASC order (oldest -> newest).
   Future<List<Message>> page(String chatId, {String? beforeIso}) async {
@@ -337,16 +354,19 @@ class MessageCache {
   /// DB is already encrypted at rest (LocalDatabase seal), same trust
   /// level as the rest of the cached message content.
   String? _pollJson(Message m) {
+    final hasStoryRef = m.storyRef != null;
     if (m.poll != null) {
       return jsonEncode({
         'poll': m.poll!.toJson(),
         if (m.pollVote != null) 'vote': m.pollVote,
+        if (hasStoryRef) 'sref': m.storyRef,
       });
     }
-    if (m.pollVote != null || m.pollRef != null) {
+    if (m.pollVote != null || m.pollRef != null || hasStoryRef) {
       return jsonEncode({
         if (m.pollVote != null) 'vote': m.pollVote,
         if (m.pollRef != null) 'ref': m.pollRef,
+        if (hasStoryRef) 'sref': m.storyRef,
       });
     }
     return null;
@@ -359,12 +379,14 @@ class MessageCache {
       PollInfo? poll;
       int? pollVote;
       String? pollRef;
+      String? storyRef;
       if (pollJson != null && pollJson.isNotEmpty) {
         try {
           final j = jsonDecode(pollJson) as Map<String, dynamic>;
           poll = PollInfo.fromJson(j['poll'] as Map<String, dynamic>?);
           pollVote = (j['vote'] as num?)?.toInt();
           pollRef = j['ref'] as String?;
+          storyRef = j['sref'] as String?;
         } catch (_) {}
       }
       return Message(
@@ -381,6 +403,7 @@ class MessageCache {
         poll: poll,
         pollVote: pollVote,
         pollRef: pollRef,
+        storyRef: storyRef,
         replyTo: r['reply_to'] as String?,
         replyPreview: r['reply_preview'] as String?,
         forwardedFrom: r['forwarded_from'] as String?,
