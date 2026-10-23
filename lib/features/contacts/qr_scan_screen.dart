@@ -61,7 +61,7 @@ class _QrScanScreenState extends State<QrScanScreen> {
           MobileScanner(
             controller: _camera,
             onDetect: _onDetect,
-            errorBuilder: (ctx, error) => _cameraError(ctx, error),
+            errorBuilder: _cameraError,
           ),
           // إطار توجيه مركزي
           Center(

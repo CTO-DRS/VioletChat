@@ -829,12 +829,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         child: CircularProgressIndicator(strokeWidth: 2))
                     : const Icon(Icons.system_update_alt_rounded,
                         color: AppTheme.brandSecondary),
-                title: Text(AppConfig.appName,
-                    style: const TextStyle(fontWeight: FontWeight.w800)),
-                subtitle: Text(
+                title: const Text(AppConfig.appName,
+                    style: TextStyle(fontWeight: FontWeight.w800)),
+                subtitle: const Text(
                   'الإصدار ${AppConfig.appVersion} — مبني بتقنية تشفير '
                   'X3DH + Double Ratchet',
-                  style: const TextStyle(fontSize: 11),
+                  style: TextStyle(fontSize: 11),
                 ),
                 trailing: const Icon(Icons.chevron_left),
                 onTap: _checkingUpdate ? null : _checkForUpdates,
