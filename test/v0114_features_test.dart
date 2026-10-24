@@ -175,7 +175,8 @@ void main() {
       final svc2 = ScheduledMessagesService(store);
       await svc2.load();
       expect(svc2.forChat('c1').single.text, 'أولاً');
-      expect(svc2.forChat('c2'), isEmpty);
+      // c2 was never cancelled — it must survive the reload too.
+      expect(svc2.forChat('c2').single.text, 'لمحادثة أخرى');
     });
 
     test('wipe clears both memory and store (sign-out path)', () async {
