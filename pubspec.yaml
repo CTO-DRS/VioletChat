@@ -22,6 +22,13 @@ publish_to: 'none'
 # لقبول location/contact (رقعة حية).
 version: 0.1.12+19
 
+# package_info_plus 9+/10+ تُبنى بـKotlin 2.2 (metadata 2.2.0) بينما
+# مشروعنا على Kotlin 1.9.24 — سحبها geolocator_* حديثاً كسحلية عبور.
+# واجهة البرمجة (PackageInfo.fromPlatform) ثابتة عبر الإصدارات —
+# خفض آمن يبقي بناء Gradle على سلسلة Kotlin 1.9 كاملة.
+dependency_overrides:
+  package_info_plus: 8.3.1
+
 environment:
   sdk: '>=3.5.0 <4.0.0'
 
