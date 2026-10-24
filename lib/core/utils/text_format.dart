@@ -39,7 +39,7 @@ typedef _Pair = ({
   int innerEnd,
 });
 
-sealed _Seg {}
+sealed class _Seg {}
 
 class _Plain extends _Seg {
   final String text;

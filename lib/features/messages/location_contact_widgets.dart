@@ -214,7 +214,7 @@ class _LocationPickSheetState extends State<LocationPickSheet> {
   late LatLng _center = widget.initialCenter;
   late double _zoom = widget.locateFirst ? 15 : 16;
   bool _locating = false;
-  double _accuracy = widget.initialAccuracy;
+  late double _accuracy = widget.initialAccuracy;
 
   @override
   void initState() {
@@ -307,11 +307,9 @@ class _LocationPickSheetState extends State<LocationPickSheet> {
                           minZoom: 2,
                           maxZoom: 19,
                           onPositionChanged: (pos, hasGesture) {
-                            final c = pos.center;
-                            if (c == null) return;
-                            _center = c;
-                            final z = pos.zoom;
-                            if (z != null) _zoom = z;
+                            // flutter_map 7: center/zoom غير قابلين للفراغ.
+                            _center = pos.center;
+                            _zoom = pos.zoom;
                           },
                         ),
                         children: [
@@ -347,8 +345,8 @@ class _LocationPickSheetState extends State<LocationPickSheet> {
                       if (_locating)
                         const Positioned(
                           top: 10,
-                          start: 10,
-                          end: 10,
+                          left: 10,
+                          right: 10,
                           child: IgnorePointer(
                             child: Align(
                               alignment: Alignment.topCenter,
