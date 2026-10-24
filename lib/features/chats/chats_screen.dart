@@ -175,6 +175,12 @@ class _ChatsScreenState extends State<ChatsScreen>
       final t = (m.text ?? '').trim();
       return t.isEmpty ? '↩ رد على حالة' : '↩ $t';
     }
+    // v0.1.12: الموقع المشفر والبطاقات المشفرة تُعلن نفسها بالقائمة.
+    if (m.kind == AppConstants.kindLocation) return '📍 موقع';
+    if (m.kind == AppConstants.kindContact) {
+      final n = m.contact?.displayName;
+      return n == null || n.isEmpty ? '👤 بطاقة جهة اتصال' : '👤 $n';
+    }
     if (m.kind == AppConstants.kindMedia && m.media != null) {
       switch (m.media!.type) {
         case AppConstants.mediaImage:

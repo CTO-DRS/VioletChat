@@ -204,7 +204,7 @@ class MessageCryptoService {
 // ------------------------------------------------------------------
 
 class InnerPayload {
-  final String kind; // text | media | system | poll | pollVote
+  final String kind; // text | media | system | poll | pollVote | storyReply | location | contact
   final String? text;
   final MediaInfo? media;
   final String? replyTo;
@@ -223,6 +223,14 @@ class InnerPayload {
   /// ciphertext. The reply text is [text].
   final String? storyRef;
 
+  /// v0.1.12: encrypted location point (kind == 'location'), inside
+  /// the ciphertext — the server never sees coordinates.
+  final LocationInfo? location;
+
+  /// v0.1.12: encrypted contact card (kind == 'contact'), inside the
+  /// ciphertext — username + display name.
+  final ContactInfo? contact;
+
   /// v0.1.0: original message id when this row arrived by forwarding.
   /// Rides INSIDE the ciphertext (E2E metadata) and is mirrored in the
   /// plaintext forwarded_from column, exactly like replyTo.
@@ -237,6 +245,8 @@ class InnerPayload {
     this.pollVote,
     this.pollRef,
     this.storyRef,
+    this.location,
+    this.contact,
     this.replyTo,
     this.forwardedFrom,
     this.decrypted = true,
@@ -250,6 +260,8 @@ class InnerPayload {
         pollVote: (j['vote'] as num?)?.toInt(),
         pollRef: j['pollRef'] as String?,
         storyRef: j['storyRef'] as String?,
+        location: LocationInfo.fromJson(j['loc'] as Map<String, dynamic>?),
+        contact: ContactInfo.fromJson(j['card'] as Map<String, dynamic>?),
         replyTo: j['replyTo'] as String?,
         forwardedFrom: j['forwardedFrom'] as String?,
       );
@@ -262,6 +274,8 @@ class InnerPayload {
         if (pollVote != null) 'vote': pollVote,
         if (pollRef != null) 'pollRef': pollRef,
         if (storyRef != null) 'storyRef': storyRef,
+        if (location != null) 'loc': location!.toJson(),
+        if (contact != null) 'card': contact!.toJson(),
         if (replyTo != null) 'replyTo': replyTo,
         if (forwardedFrom != null) 'forwardedFrom': forwardedFrom,
       };

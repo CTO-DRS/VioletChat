@@ -20,6 +20,16 @@ class AppConstants {
   /// travel INSIDE the ciphertext; the server sees just another row.
   static const String kindStoryReply = 'storyReply';
 
+  /// v0.1.12: encrypted location point — coordinates INSIDE the
+  /// ciphertext; the server only sees kind='location'. Rendered as a
+  /// map-preview bubble (tiles fetched anonymously from OSM).
+  static const String kindLocation = 'location';
+
+  /// v0.1.12: encrypted contact card — username+display name INSIDE
+  /// the ciphertext; tapping resolves through the search path (same
+  /// flow as QR add, camera-free).
+  static const String kindContact = 'contact';
+
   // Media subtypes (stored inside the encrypted payload)
   static const String mediaImage = 'image';
   static const String mediaAudio = 'audio';

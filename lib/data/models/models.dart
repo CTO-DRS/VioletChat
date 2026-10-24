@@ -356,6 +356,100 @@ class PollInfo {
   bool isValidOption(int i) => i >= 0 && i < options.length;
 }
 
+/// v0.1.12 — نقطة موقع مشفرة (kind='location'). الإحداثيات تعيش
+/// داخل التشفير حصراً؛ الخادم يرى كلمة 'location' فقط. [label]
+/// وسم اختياري يكتبه المرسل ("المنزل"). التحقق دفاعي: أي قيمة
+/// خارج النطاق الجغرافي الصحيح تُفسد الحمولة كلها (return null)
+/// بدل عرض إحداثيات ملوّثة.
+class LocationInfo {
+  static const double minLat = -90.0, maxLat = 90.0;
+  static const double minLng = -180.0, maxLng = 180.0;
+
+  final double lat;
+  final double lng;
+  final String? label;
+
+  const LocationInfo({required this.lat, required this.lng, this.label});
+
+  Map<String, dynamic> toJson() => {
+        'lat': lat,
+        'lng': lng,
+        if (label != null && label!.trim().isNotEmpty) 'label': label,
+      };
+
+  static LocationInfo? fromJson(Map<String, dynamic>? j) {
+    if (j == null) return null;
+    try {
+      final la = (j['lat'] as num).toDouble();
+      final ln = (j['lng'] as num).toDouble();
+      if (la.isNaN ||
+          ln.isNaN ||
+          la < minLat ||
+          la > maxLat ||
+          ln < minLng ||
+          ln > maxLng) {
+        return null;
+      }
+      final lb = (j['label'] as String?)?.trim();
+      return LocationInfo(lat: la, lng: ln, label: (lb == null || lb.isEmpty) ? null : lb);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// رابط خريطة خارجي — geo: الأصلي على أندرويد، مع سقوط ناعم
+  /// لرابط خرائط Google يفتح في أي متصفح.
+  String geoUri() => 'geo:$lat,$lng?q=$lat,$lng${label != null ? '(${Uri.encodeComponent(label!)})' : ''}';
+
+  String webMapUri() =>
+      'https://www.google.com/maps/search/?api=1&query=$lat,$lng';
+
+  /// عرض مختصر للأحداثيات (5 أرقام عشرية ≈ 1.1 متر دقة).
+  String coordsText() =>
+      '${lat.toStringAsFixed(5)}, ${lng.toStringAsFixed(5)}';
+}
+
+/// v0.1.12 — بطاقة جهة اتصال مشفرة (kind='contact'). تُرسل كمرجع
+/// اسم-مستخدم داخل التشفير؛ فتح البطاقة يحل الاسم إلى ملف/محادثة
+/// عبر مسار البحث القائم (نفس مسار QR بدون كاميرا).
+class ContactInfo {
+  final String username;
+  final String displayName;
+
+  const ContactInfo({required this.username, required this.displayName});
+
+  Map<String, dynamic> toJson() => {
+        'username': username,
+        'name': displayName,
+      };
+
+  static ContactInfo? fromJson(Map<String, dynamic>? j) {
+    if (j == null) return null;
+    final u = (j['username'] as String?)?.trim();
+    if (u == null || u.isEmpty) return null;
+    final n = (j['name'] as String?)?.trim();
+    return ContactInfo(
+      username: u,
+      displayName: (n == null || n.isEmpty) ? u : n,
+    );
+  }
+
+  /// أحرف البادئة للأفاتار (حتى حرفين من الاسم المعروض) —
+  /// عبر runes لصحة العربية (كل حرف عربي قد يمثل رمزين UTF-16).
+  String initials() {
+    String take(String s, int n) =>
+        String.fromCharCodes(s.trim().runes.take(n).toList());
+    final parts = displayName
+        .trim()
+        .split(RegExp(r'\s+'))
+        .where((p) => p.isNotEmpty)
+        .toList();
+    if (parts.isEmpty) return '?';
+    if (parts.length == 1) return take(parts.first, 2).toUpperCase();
+    return (take(parts.first, 1) + take(parts.last, 1)).toUpperCase();
+  }
+}
+
 /// Lifecycle of an outgoing message on THIS device.
 enum MsgState { queued, sending, sent, delivered, read, failed }
 
@@ -386,6 +480,12 @@ class Message {
   /// sees it). Rendered as a «رد على حالة» chip on the bubble; tapping
   /// it re-opens the story while it is still live.
   final String? storyRef;
+
+  /// v0.1.12: encrypted location point (kind == 'location' only).
+  final LocationInfo? location;
+
+  /// v0.1.12: encrypted contact card (kind == 'contact' only).
+  final ContactInfo? contact;
   final String? replyTo;
   final String? replyPreview;
 
@@ -422,6 +522,8 @@ class Message {
     this.pollVote,
     this.pollRef,
     this.storyRef,
+    this.location,
+    this.contact,
     this.replyTo,
     this.replyPreview,
     this.forwardedFrom,
@@ -451,6 +553,8 @@ class Message {
     int? pollVote,
     String? pollRef,
     String? storyRef,
+    LocationInfo? location,
+    ContactInfo? contact,
   }) =>
       Message(
         id: clientMsgId, // provisional id until server confirms
@@ -465,6 +569,8 @@ class Message {
         pollVote: pollVote,
         pollRef: pollRef,
         storyRef: storyRef,
+        location: location,
+        contact: contact,
         replyTo: replyTo,
         replyPreview: replyPreview,
         createdAt: DateTime.now().toUtc().toIso8601String(),
@@ -488,6 +594,8 @@ class Message {
     int? pollVote,
     String? pollRef,
     String? storyRef,
+    LocationInfo? location,
+    ContactInfo? contact,
   }) =>
       Message(
         id: id,
@@ -502,6 +610,8 @@ class Message {
         pollVote: pollVote ?? this.pollVote,
         pollRef: pollRef ?? this.pollRef,
         storyRef: storyRef ?? this.storyRef,
+        location: location ?? this.location,
+        contact: contact ?? this.contact,
         replyTo: replyTo,
         replyPreview: replyPreview,
         forwardedFrom: forwardedFrom ?? this.forwardedFrom,

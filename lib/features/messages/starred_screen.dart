@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../core/constants/app_constants.dart';
 import '../../core/utils/smart_date.dart';
 import '../../data/models/models.dart';
 import '../../routing/app_router.dart';
@@ -59,6 +60,12 @@ class _StarredScreenState extends State<StarredScreen> {
     if (m.isDeletedForAll) return '🚫 تم حذف هذه الرسالة';
     final text = m.text?.trim();
     if (text != null && text.isNotEmpty) return text;
+    // v0.1.12: الأنواع الجديدة بلا نص تُعلن نفسها في المحفوظات.
+    if (m.kind == AppConstants.kindLocation) return '📍 موقع';
+    if (m.kind == AppConstants.kindContact) {
+      final n = m.contact?.displayName;
+      return n == null || n.isEmpty ? '👤 بطاقة جهة اتصال' : '👤 $n';
+    }
     return switch (m.media?.type) {
       'image' => '📷 صورة',
       'audio' => '🎤 رسالة صوتية',

@@ -17,7 +17,10 @@ publish_to: 'none'
 # جداول violet_story_* جديدة + توسيع قيد messages.kind على الخادم.
 # v0.1.11 (code 18): تعديل رسائل الاستطلاع + ردود على الحالات +
 # حالات فيديو — توسيع قيد messages.kind لقبول storyReply (رقعة حية).
-version: 0.1.11+18
+# v0.1.12 (code 19): مشاركة الموقع المشفرة (GPS/خريطة OSM) + بطاقات
+# جهات الاتصال المشفرة + تنسيق نص الرسائل — توسيع قيد messages.kind
+# لقبول location/contact (رقعة حية).
+version: 0.1.12+19
 
 environment:
   sdk: '>=3.5.0 <4.0.0'
@@ -90,6 +93,13 @@ dependencies:
 
   # --- Calls (WebRTC) ---
   flutter_webrtc: ^0.14.0
+
+  # --- v0.1.12: Location sharing ---
+  # flutter_map + latlong2: خريطة OSM بلا مفاتيح API (منتقي + معاينة).
+  # geolocator: الموقع الحالي (يتطلب صلاحيات موقع في الـManifest).
+  flutter_map: ^7.0.2
+  latlong2: ^0.9.1
+  geolocator: ^14.0.0
 
   # --- Utilities ---
   uuid: ^4.5.1

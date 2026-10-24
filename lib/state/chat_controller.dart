@@ -327,11 +327,31 @@ class ChatController extends ChangeNotifier {
   // ------------------------------------------------------------------
   // Sending
   // ------------------------------------------------------------------
+
+  /// v0.1.12: honest reply preview for EVERY kind — the old code fell
+  /// back to «📎 وسائط» for anything without text (polls, locations,
+  /// cards…), which lied in the composer bar.
+  static String replyPreviewOf(Message m) {
+    final t = (m.text ?? '').trim();
+    if (t.isNotEmpty && m.kind == 'media') return t;
+    if (t.isNotEmpty && m.kind != AppConstants.kindContact) return t;
+    return switch (m.kind) {
+      AppConstants.kindMedia => '📎 وسائط',
+      AppConstants.kindPoll => '📊 استطلاع رأي',
+      AppConstants.kindLocation => '📍 موقع',
+      AppConstants.kindContact => '👤 ${m.contact?.displayName ?? 'بطاقة جهة اتصال'}',
+      AppConstants.kindStoryReply => 'رد على حالة',
+      _ => t.isEmpty ? 'رسالة' : t,
+    };
+  }
+
   Future<void> sendText(String text, {String? forwardedFrom}) async {
     if (text.trim().isEmpty) return;
     final m = await services.sync.enqueueText(chat, text.trim(),
         replyTo: replyTo?.id,
-        replyPreview: replyTo?.text ?? '📎 وسائط',
+        replyPreview: replyTo == null
+            ? null
+            : replyPreviewOf(replyTo!),
         forwardedFrom: forwardedFrom);
     messages = [...messages, m];
     _clearReply();
@@ -353,6 +373,36 @@ class ChatController extends ChangeNotifier {
         replyTo: replyTo?.id,
         replyPreview: '📎 ${media.type}',
         forwardedFrom: forwardedFrom);
+    messages = [...messages, m];
+    _clearReply();
+    notifyListeners();
+    await services.sync.drain();
+    atLatest = true;
+    newBelow = 0;
+    await _refreshWindow();
+    notifyListeners();
+  }
+
+  /// v0.1.12 — publish an encrypted location point into this chat.
+  Future<void> sendLocation(LocationInfo loc) async {
+    final m = await services.sync.enqueueLocation(chat, loc,
+        replyTo: replyTo?.id,
+        replyPreview: replyTo == null ? null : replyPreviewOf(replyTo!));
+    messages = [...messages, m];
+    _clearReply();
+    notifyListeners();
+    await services.sync.drain();
+    atLatest = true;
+    newBelow = 0;
+    await _refreshWindow();
+    notifyListeners();
+  }
+
+  /// v0.1.12 — publish an encrypted contact card into this chat.
+  Future<void> sendContact(ContactInfo card) async {
+    final m = await services.sync.enqueueContact(chat, card,
+        replyTo: replyTo?.id,
+        replyPreview: replyTo == null ? null : replyPreviewOf(replyTo!));
     messages = [...messages, m];
     _clearReply();
     notifyListeners();

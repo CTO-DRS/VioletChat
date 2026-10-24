@@ -3,10 +3,15 @@
     <!-- v0.1.9 — url_launcher: Android 11+ requires package visibility
          declaration before canLaunchUrl/launchUrl on https links
          (صفحة الإصدار عند اكتشاف تحديث). -->
+    <!-- v0.1.12 — فتح نقطة الموقع في تطبيقات الخرائط (geo:) -->
     <queries>
         <intent>
             <action android:name="android.intent.action.VIEW" />
             <data android:scheme="https" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="geo" />
         </intent>
     </queries>
 
@@ -47,6 +52,12 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
+
+    <!-- v0.1.12 — مشاركة الموقع: الموقع الحالي عبر geolocator
+         (دقيق + تقريبي فقط عند التنكير) — مطالبة وقت التشغيل داخل
+         ورقة المشاركة، لا شيء يعمل في الخلفية. -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
 
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />

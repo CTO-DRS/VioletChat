@@ -5,6 +5,7 @@ import 'package:sqflite/sqflite.dart';
 import 'package:uuid/uuid.dart';
 
 import '../core/logging/app_logger.dart';
+import '../core/constants/app_constants.dart';
 import '../core/storage/local_database.dart';
 import '../core/storage/message_cache.dart';
 import '../data/models/models.dart';
@@ -253,6 +254,77 @@ class SyncEngine {
     return m;
   }
 
+  /// v0.1.12 — encrypted location share. Coordinates travel INSIDE
+  /// the ciphertext; the server row only carries kind='location'.
+  /// [label] is an optional sender-written place name (also inside).
+  Future<Message> enqueueLocation(Chat chat, LocationInfo loc,
+      {String? replyTo, String? replyPreview}) async {
+    final clientMsgId = _uuid();
+    final inner = {
+      'kind': AppConstants.kindLocation,
+      'loc': loc.toJson(),
+      if (replyTo != null) 'replyTo': replyTo,
+    };
+    final m = Message.placeholder(
+      clientMsgId: clientMsgId,
+      chatId: chat.id,
+      senderId: auth.userId!,
+      senderDeviceId: crypto.identity.deviceId,
+      text: (loc.label == null || loc.label!.trim().isEmpty)
+          ? null
+          : loc.label,
+      media: null,
+      kind: AppConstants.kindLocation,
+      location: loc,
+      replyTo: replyTo,
+      replyPreview: replyPreview,
+    );
+    await cache.upsertMessage(m);
+    await _enqueue(chat.id, 'send', {
+      'client_msg_id': clientMsgId,
+      'chat_id': chat.id,
+      'kind': AppConstants.kindLocation,
+      'inner': inner,
+      if (replyTo != null) 'reply_to': replyTo,
+    });
+    return m;
+  }
+
+  /// v0.1.12 — encrypted contact card. Username + display name travel
+  /// INSIDE the ciphertext; the server row only carries kind='contact'.
+  /// The receiver resolves the username through the same search path
+  /// used by QR add — camera-free.
+  Future<Message> enqueueContact(Chat chat, ContactInfo card,
+      {String? replyTo, String? replyPreview}) async {
+    final clientMsgId = _uuid();
+    final inner = {
+      'kind': AppConstants.kindContact,
+      'card': card.toJson(),
+      if (replyTo != null) 'replyTo': replyTo,
+    };
+    final m = Message.placeholder(
+      clientMsgId: clientMsgId,
+      chatId: chat.id,
+      senderId: auth.userId!,
+      senderDeviceId: crypto.identity.deviceId,
+      text: card.displayName,
+      media: null,
+      kind: AppConstants.kindContact,
+      contact: card,
+      replyTo: replyTo,
+      replyPreview: replyPreview,
+    );
+    await cache.upsertMessage(m);
+    await _enqueue(chat.id, 'send', {
+      'client_msg_id': clientMsgId,
+      'chat_id': chat.id,
+      'kind': AppConstants.kindContact,
+      'inner': inner,
+      if (replyTo != null) 'reply_to': replyTo,
+    });
+    return m;
+  }
+
   Future<void> enqueueDelete(String messageId, Chat chat) async {
     await _enqueue(chat.id, 'delete', {
       'message_id': messageId,
@@ -483,6 +555,8 @@ class SyncEngine {
         pollVote: inner.pollVote,
         pollRef: inner.pollRef,
         storyRef: inner.storyRef,
+        location: inner.location,
+        contact: inner.contact,
         replyTo: (row['reply_to'] ?? inner.replyTo) as String?,
         forwardedFrom:
             (row['forwarded_from'] ?? inner.forwardedFrom) as String?,

@@ -353,12 +353,19 @@ class MessageCache {
   /// v0.1.10: decrypted poll payloads for the local cache. The local
   /// DB is already encrypted at rest (LocalDatabase seal), same trust
   /// level as the rest of the cached message content.
+  /// v0.1.12: location ('loc') and contact cards ('card') ride the
+  /// same column — no schema migration.
   String? _pollJson(Message m) {
     final hasStoryRef = m.storyRef != null;
-    if (m.poll != null) {
+    final hasLoc = m.location != null;
+    final hasCard = m.contact != null;
+    if (m.poll != null || hasLoc || hasCard) {
       return jsonEncode({
-        'poll': m.poll!.toJson(),
+        if (m.poll != null) 'poll': m.poll!.toJson(),
+        if (hasLoc) 'loc': m.location!.toJson(),
+        if (hasCard) 'card': m.contact!.toJson(),
         if (m.pollVote != null) 'vote': m.pollVote,
+        if (m.pollRef != null) 'ref': m.pollRef,
         if (hasStoryRef) 'sref': m.storyRef,
       });
     }
@@ -380,6 +387,8 @@ class MessageCache {
       int? pollVote;
       String? pollRef;
       String? storyRef;
+      LocationInfo? location;
+      ContactInfo? contact;
       if (pollJson != null && pollJson.isNotEmpty) {
         try {
           final j = jsonDecode(pollJson) as Map<String, dynamic>;
@@ -387,6 +396,8 @@ class MessageCache {
           pollVote = (j['vote'] as num?)?.toInt();
           pollRef = j['ref'] as String?;
           storyRef = j['sref'] as String?;
+          location = LocationInfo.fromJson(j['loc'] as Map<String, dynamic>?);
+          contact = ContactInfo.fromJson(j['card'] as Map<String, dynamic>?);
         } catch (_) {}
       }
       return Message(
@@ -404,6 +415,8 @@ class MessageCache {
         pollVote: pollVote,
         pollRef: pollRef,
         storyRef: storyRef,
+        location: location,
+        contact: contact,
         replyTo: r['reply_to'] as String?,
         replyPreview: r['reply_preview'] as String?,
         forwardedFrom: r['forwarded_from'] as String?,

@@ -209,6 +209,12 @@ class _SearchScreenState extends State<SearchScreen>
           return '📎 ملف';
       }
     }
+    // v0.1.12: الأنواع بلا نص تُعلن نفسها في نتائج البحث أيضاً.
+    if (m.kind == AppConstants.kindLocation) return '📍 موقع';
+    if (m.kind == AppConstants.kindContact) {
+      final n = m.contact?.displayName;
+      return n == null || n.isEmpty ? '👤 بطاقة جهة اتصال' : '👤 $n';
+    }
     return m.text ?? '';
   }
 

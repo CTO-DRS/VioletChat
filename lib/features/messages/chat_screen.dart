@@ -14,6 +14,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 import 'package:record/record.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:video_player/video_player.dart';
 
 import '../../core/config/app_config.dart';
@@ -23,6 +24,7 @@ import '../../core/storage/local_database.dart';
 import '../../core/utils/disappearing_policy.dart';
 import '../../core/utils/poll_tally.dart';
 import '../../core/utils/smart_date.dart';
+import '../../core/utils/text_format.dart';
 import '../../data/models/models.dart';
 import '../../routing/app_router.dart';
 import '../../services/chat_export_service.dart';
@@ -32,6 +34,7 @@ import '../../state/chats_controller.dart';
 import '../../state/settings_controller.dart';
 import '../../theme/app_theme.dart';
 import 'poll_widgets.dart';
+import 'location_contact_widgets.dart';
 import '../../widgets/brand.dart';
 import '../../widgets/verified_badge.dart';
 import '../../widgets/swipe_to_reply.dart';
@@ -194,6 +197,117 @@ class _ChatScreenState extends State<ChatScreen> {
         _scroll.jumpTo(_scroll.position.maxScrollExtent);
       }
     });
+  }
+
+  // ===================================================================
+  // v0.1.12 — Location share + contact cards
+  // ===================================================================
+  Future<void> _sendLocationFlow() async {
+    final src = await showLocationSourceSheet(context);
+    if (src == null || !mounted) return;
+    // تهيئة الخريطة بهدوء: آخر موقع معروف (بلا مطالبة أذونات)،
+    // أما «الموقع الحالي» فتجلب داخل الورقة نفسها (locateFirst).
+    var init = kDefaultMapCenter;
+    if (src == 'map') {
+      final lk = await lastKnownMapCenter();
+      if (lk != null) init = lk;
+      if (!mounted) return;
+    }
+    final loc = await showModalBottomSheet<LocationInfo>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (_) => LocationPickSheet(
+        initialCenter: init,
+        locateFirst: src == 'gps',
+      ),
+    );
+    if (loc == null || !mounted) return;
+    try {
+      await _c.sendLocation(loc);
+      _jumpToBottom();
+    } catch (_) {
+      _err('تعذر إرسال الموقع — ستعاد المحاولة تلقائياً');
+    }
+  }
+
+  Future<void> _sendContactFlow() async {
+    final card = await showContactPickSheet(context);
+    if (card == null || !mounted) return;
+    try {
+      await _c.sendContact(card);
+      _jumpToBottom();
+    } catch (_) {
+      _err('تعذر إرسال البطاقة — ستعاد المحاولة تلقائياً');
+    }
+  }
+
+  /// فتح نقطة الموقع في تطبيق الخرائط الخارجي — geo: أولاً ثم
+  /// رابط ويب شامل كسقوط ناعم. لا شيء يُرسل أونلاين من التطبيق نفسه.
+  Future<void> _openExternalMap(LocationInfo loc) async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final ok = await launchUrl(Uri.parse(loc.geoUri()),
+          mode: LaunchMode.externalApplication);
+      if (ok || !mounted) return;
+      await launchUrl(Uri.parse(loc.webMapUri()),
+          mode: LaunchMode.externalApplication);
+    } catch (_) {
+      try {
+        await launchUrl(Uri.parse(loc.webMapUri()),
+            mode: LaunchMode.externalApplication);
+      } catch (_) {
+        messenger.showSnackBar(
+            const SnackBar(content: Text('تعذر فتح تطبيق الخرائط')));
+      }
+    }
+  }
+
+  /// فتح بطاقة جهة اتصال — نفس مسار إضافة QR: بحث بالاسم الفعلي
+  /// ثم مطابقة تامة ثم إنشاء/جلب المحادثة المباشرة.
+  Future<void> _openContactCard(ContactInfo card) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final nav = Navigator.of(context);
+    final chatsCtrl = context.read<ChatsController>();
+    try {
+      final me = await _services.profiles.getMyProfile();
+      if (me.username.toLowerCase() == card.username.toLowerCase()) {
+        messenger.showSnackBar(const SnackBar(
+            content: Text('هذه بطاقتك أنت — شاركها مع أصدقائك')));
+        return;
+      }
+      final results = await _services.profiles.searchUsers(card.username);
+      Profile? match;
+      for (final p in results) {
+        if (p.username.toLowerCase() == card.username.toLowerCase()) {
+          match = p;
+          break;
+        }
+      }
+      if (match == null) {
+        messenger.showSnackBar(SnackBar(
+            content: Text(
+                'لم يُعثر على @${card.username} — تأكد أنه مسجل في Violet Chat')));
+        return;
+      }
+      if (match.id == _c.myId) {
+        messenger.showSnackBar(
+            const SnackBar(content: Text('هذه بطاقتك أنت')));
+        return;
+      }
+      final chatId = await chatsCtrl.openDirectChat(match.id);
+      final chat = Chat(
+        id: chatId,
+        type: AppConstants.chatDirect,
+        peer: match,
+        createdAt: DateTime.now().toUtc().toIso8601String(),
+      );
+      if (!mounted) return;
+      nav.pushNamed(AppRoutes.chat, arguments: chat);
+    } catch (_) {
+      messenger.showSnackBar(const SnackBar(
+          content: Text('تعذر فتح المحادثة — تحقق من الاتصال')));
+    }
   }
 
   // ===================================================================
@@ -929,14 +1043,7 @@ class _ChatScreenState extends State<ChatScreen> {
         if (m == null || m.isDeletedForAll) {
           return const SizedBox(width: double.infinity);
         }
-        final preview = (m.text != null && m.text!.trim().isNotEmpty)
-            ? m.text!
-            : switch (m.media?.type) {
-                'image' => '📷 صورة',
-                'audio' => '🎤 رسالة صوتية',
-                'video' => '🎬 فيديو',
-                _ => '📎 ملف',
-              };
+        final preview = kindPreview(m);
         final mine = m.senderId == _c.myId;
         return Material(
           color: Theme.of(context).colorScheme.surfaceContainerHighest,
@@ -1409,8 +1516,14 @@ class _ChatScreenState extends State<ChatScreen> {
     final mine = m.senderId == _c.myId;
     final reactions = _c.reactionsByMsg[m.id] ?? const <Reaction>[];
 
-    final bubble = m.kind == AppConstants.kindPoll
-        ? PollBubble(
+    final bubble;
+    if (m.isDeletedForAll) {
+      // المحذوفة للجميع تعرض نص الحذف عبر _bubble — أياً كان نوعها.
+      bubble = _bubble(m, mine);
+    } else {
+      switch (m.kind) {
+        case AppConstants.kindPoll:
+          bubble = PollBubble(
             pollMsg: m,
             mine: mine,
             chatMessages: _c.messages,
@@ -1419,9 +1532,32 @@ class _ChatScreenState extends State<ChatScreen> {
             onVote: (i) => _c.castVote(m, i),
             // v0.1.11: long-press opens the generic sheet — the edit
             // tile appears there for the author while votes == 0.
-            onLongPress: m.isDeletedForAll ? null : () => _msgSheet(m),
-          )
-        : _bubble(m, mine);
+            onLongPress: () => _msgSheet(m),
+          );
+        case AppConstants.kindLocation:
+          // v0.1.12: خريطة معاينة — اللمس يفتح الخريطة الخارجية.
+          bubble = LocationBubble(
+            msg: m,
+            mine: mine,
+            onOpen: m.location == null
+                ? null
+                : () => _openExternalMap(m.location!),
+            onSheet: () => _msgSheet(m),
+          );
+        case AppConstants.kindContact:
+          // v0.1.12: بطاقة جهة اتصال — اللمس يفتح محادثتها.
+          bubble = ContactBubble(
+            msg: m,
+            mine: mine,
+            onOpen: m.contact == null
+                ? null
+                : () => _openContactCard(m.contact!),
+            onSheet: () => _msgSheet(m),
+          );
+        default:
+          bubble = _bubble(m, mine);
+      }
+    }
     final highlighted = _highlightId == m.id;
     // v0.1.0: key registry for tap-to-jump on reply quotes + flash.
     final key = _tileKeys.putIfAbsent(m.id, GlobalKey.new);
@@ -1614,28 +1750,17 @@ class _ChatScreenState extends State<ChatScreen> {
               if ((m.text ?? '').trim().isNotEmpty && m.kind == 'media')
                 Padding(
                   padding: const EdgeInsetsDirectional.only(top: 5),
-                  child: SelectableText(
-                    m.text!,
+                  child: SelectableText.rich(
+                    _fmtMessageSpan(m.text!, mine),
                     textAlign: TextAlign.right,
-                    style: TextStyle(
-                        fontSize: _chatFont.toDouble(),
-                        color: mine
-                            ? Colors.white
-                            : Theme.of(context).colorScheme.onSurface),
                   ),
                 ),
               if ((m.text ?? '').trim().isNotEmpty &&
                   (m.kind == 'text' ||
                       m.kind == AppConstants.kindStoryReply))
-                SelectableText(
-                  m.text!,
+                SelectableText.rich(
+                  _fmtMessageSpan(m.text!, mine),
                   textAlign: TextAlign.right,
-                  style: TextStyle(
-                      fontSize: _chatFont.toDouble(),
-                      height: 1.4,
-                      color: mine
-                          ? Colors.white
-                          : Theme.of(context).colorScheme.onSurface),
                 ),
             ],
             const SizedBox(height: 3),
@@ -1802,6 +1927,28 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
+  /// v0.1.12 — تنسيق نص الرسالة (غامق/مائل/شطب/كود) بتحليل محلي
+  /// صرف — لا يمس التشفير؛ يعمل على النص المفكوك فقط. ألوان الكود
+  /// تحترم لون الفقاعة (تدرج بنفسجي لرسائلي / سطح عادي لغيرها).
+  TextSpan _fmtMessageSpan(String text, bool mine) {
+    final baseColor = mine
+        ? Colors.white
+        : Theme.of(context).colorScheme.onSurface;
+    return buildMessageSpan(
+      text,
+      base: TextStyle(
+          fontSize: _chatFont.toDouble(),
+          height: 1.4,
+          color: baseColor),
+      codeStyle: CodeSpanStyle(
+        background: mine
+            ? Colors.white.withValues(alpha: 0.18)
+            : AppTheme.brandPrimary.withValues(alpha: 0.08),
+        foreground: mine ? Colors.white : AppTheme.brandSecondary,
+      ),
+    );
+  }
+
   /// v0.1.0: pill shown while the user is reading older history and
   /// new messages arrive below the loaded window. Tapping returns to
   /// the newest page (same as most messengers' "new messages" chip).
@@ -1944,7 +2091,7 @@ class _ChatScreenState extends State<ChatScreen> {
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  (reply.text ?? '').trim().isEmpty ? '📎 وسائط' : reply.text!,
+                  ChatController.replyPreviewOf(reply),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   // v0.1.0: was Colors.white54 — invisible on the light
@@ -2141,18 +2288,21 @@ class _ChatScreenState extends State<ChatScreen> {
   void _attachmentSheet() {
     // v0.1.2: neon grid sheet — big glowing tiles instead of list rows
     // (mockup quick-attachments: الصور / الملفات / الكاميرا).
+    // v0.1.12: صارت الورقة أطول (الاستطلاع + الموقع + البطاقة) —
+    // تمرير أمان حتى على الشاشات القصيرة.
     showModalBottomSheet<void>(
       context: context,
       builder: (sheetCtx) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 18),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text('إرفاق', textAlign: TextAlign.center,
-                  style: Theme.of(sheetCtx).textTheme.titleMedium),
-              const SizedBox(height: 14),
+        child: SingleChildScrollView(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 18),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text('إرفاق', textAlign: TextAlign.center,
+                    style: Theme.of(sheetCtx).textTheme.titleMedium),
+                const SizedBox(height: 14),
               Row(
                 children: [
                   Expanded(
@@ -2211,6 +2361,41 @@ class _ChatScreenState extends State<ChatScreen> {
                 },
               ),
               const SizedBox(height: 10),
+              // v0.1.12: الموقع المشفر + بطاقة جهة اتصال مشفرة.
+              Row(
+                children: [
+                  Expanded(
+                    child: _attachTile(
+                      sheetCtx,
+                      icon: Icons.location_on_rounded,
+                      label: 'الموقع',
+                      hint: 'GPS أو من الخريطة',
+                      gradient: const LinearGradient(
+                          colors: [Color(0xFF059669), Color(0xFF34D399)]),
+                      onTap: () {
+                        Navigator.of(sheetCtx).pop();
+                        _sendLocationFlow();
+                      },
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: _attachTile(
+                      sheetCtx,
+                      icon: Icons.person_pin_circle_rounded,
+                      label: 'جهة اتصال',
+                      hint: 'بطاقة صديق مشفرة',
+                      gradient: const LinearGradient(
+                          colors: [Color(0xFFD97706), Color(0xFFFBBF24)]),
+                      onTap: () {
+                        Navigator.of(sheetCtx).pop();
+                        _sendContactFlow();
+                      },
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
               Text(
                 'كل المرفقات تُشفَّر طرف-لطرف قبل الرفع — حتى 50 ميجابايت',
                 textAlign: TextAlign.center,
@@ -2218,6 +2403,7 @@ class _ChatScreenState extends State<ChatScreen> {
               ),
             ],
           ),
+        ),
         ),
       ),
     );
