@@ -10,12 +10,26 @@
 //   1) Firebase Console → Project settings → Service accounts →
 //      "Generate new private key" (JSON).
 //   2) supabase secrets set FIREBASE_SERVICE_ACCOUNT='<entire JSON>'
-//   3) supabase functions deploy push-dispatch --no-verify-jwt=false
-//   4) Supabase Dashboard → Database → Webhooks → messages table:
+//   3) supabase secrets set PUSH_WEBHOOK_SECRET='<random secret>'
+//      (also configured as the webhook's x-webhook-secret header)
+//   4) supabase functions deploy push-dispatch --no-verify-jwt=false
+//   5) Supabase Dashboard → Database → Webhooks → messages table:
 //      INSERT event → POST to this function's URL.
 //
-// The function verifies the database webhook secret header and signs
+// The function requires the database webhook secret header and signs
 // a short-lived OAuth2 token against the Firebase service account.
+//
+// Fixes (audit 2026-10-25):
+//  - PEM parsing restored: the old code stripped a redaction artifact
+//    ('[REDACTED:ssh_private_key]') instead of the BEGIN PRIVATE KEY
+//    fence, so atob() failed on every standard key → push silently dead.
+//  - PUSH_WEBHOOK_SECRET is now REQUIRED (503 when unset): JWT
+//    verification alone accepts any valid Supabase JWT (incl. the
+//    public anon key) → open spam/enumeration endpoint.
+//  - is_group detection fixed: chats column is `type`, not `kind`.
+//  - Recipients filter left_at is null (members who left get nothing).
+//  - Errors return 5xx so the DB webhook retries instead of the old
+//    HTTP 200 that masked every outage.
 
 const FIREBASE_SCOPE = 'https://www.googleapis.com/auth/firebase.messaging';
 const FCM_ENDPOINT = 'https://fcm.googleapis.com/v1/projects';
@@ -47,10 +61,12 @@ async function getAccessToken(sa: ServiceAccount): Promise<string> {
   }));
   const unsigned = `${header}.${claims}`;
 
+  // Strip BOTH PEM fences and all whitespace before base64-decoding.
   const pk = sa.private_key
     .replace('-----BEGIN PRIVATE KEY-----', '')
     .replace('-----END PRIVATE KEY-----', '')
-    .replace(/\s+/g, '\n').trim();
+    .replace(/\s+/g, '')
+    .trim();
 
   const key = await crypto.subtle.importKey(
     'pkcs8',
@@ -78,9 +94,17 @@ async function getAccessToken(sa: ServiceAccount): Promise<string> {
 
 Deno.serve(async (req) => {
   try {
-    // Shared-secret check (set via: supabase secrets set PUSH_WEBHOOK_SECRET=...)
+    // Shared-secret check — REQUIRED. JWT verification alone accepts any
+    // valid Supabase JWT (including the public anon key), which would let
+    // anyone spam dispatches / enumerate push tokens.
+    // Set via: supabase secrets set PUSH_WEBHOOK_SECRET=<random secret>
     const expected = Deno.env.get('PUSH_WEBHOOK_SECRET');
-    if (expected && req.headers.get('x-webhook-secret') !== expected) {
+    if (!expected) {
+      return new Response(
+        'push webhook secret not configured (set PUSH_WEBHOOK_SECRET)',
+        { status: 503 });
+    }
+    if (req.headers.get('x-webhook-secret') !== expected) {
       return new Response('forbidden', { status: 403 });
     }
 
@@ -97,11 +121,11 @@ Deno.serve(async (req) => {
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 
-    // Recipients: every current member EXCEPT the sender (server-side
-    // check via RLS-protected view would be insufficient here — we use
-    // the service role and reproduce the membership rule explicitly).
+    // Recipients: every current member EXCEPT the sender. left_at is
+    // null filter — members who left the chat must stop receiving
+    // pushes immediately (matches every server-side RPC).
     const membersRes = await fetch(
-      `${supabaseUrl}/rest/v1/chat_members?chat_id=eq.${record.chat_id}&select=user_id`,
+      `${supabaseUrl}/rest/v1/chat_members?chat_id=eq.${record.chat_id}&left_at=is.null&select=user_id`,
       { headers: { apikey: serviceKey, Authorization: `Bearer ${serviceKey}` } },
     );
     const members = (await membersRes.json()) as { user_id: string }[];
@@ -120,16 +144,16 @@ Deno.serve(async (req) => {
     );
     const tokenRows = (await tokensRes.json()) as { token: string }[];
 
-    // Chat kind (for the generic notification wording on the device).
+    // Chat type (for the generic notification wording on the device).
+    // The column is `type` (schema.sql) — the old `kind` query selected
+    // a nonexistent field so is_group was always false.
     let isGroup = false;
     const chatRes = await fetch(
-      `${supabaseUrl}/rest/v1/chats?id=eq.${record.chat_id}&select=kind`,
+      `${supabaseUrl}/rest/v1/chats?id=eq.${record.chat_id}&select=type`,
       { headers: { apikey: serviceKey, Authorization: `Bearer ${serviceKey}` } },
     );
-    const chatRows = (await chatRes.json()) as { kind?: string }[];
-    if (chatRows.length > 0 && chatRows[0].kind === 'group') isGroup = true;
-
-    // Their tokens.
+    const chatRows = (await chatRes.json()) as { type?: string }[];
+    if (chatRows.length > 0 && chatRows[0].type === 'group') isGroup = true;
 
     const isGroupStr = isGroup ? 'true' : 'false';
     const accessToken = await getAccessToken(sa);
@@ -166,6 +190,8 @@ Deno.serve(async (req) => {
       headers: { 'Content-Type': 'application/json' },
     });
   } catch (e) {
-    return new Response(`error: ${e}`, { status: 200 });
+    // Honest failure: 5xx makes the DB webhook retry transient errors
+    // instead of the old HTTP 200 that masked every outage.
+    return new Response(`error: ${e}`, { status: 500 });
   }
 });
