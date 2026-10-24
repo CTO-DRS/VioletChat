@@ -470,6 +470,7 @@ as $$
       my.pinned_at as my_pinned_at,
       my.muted_until as my_muted_until,
       my.archived_at as my_archived_at,
+      c.disappear_ttl_seconds as disappear_ttl_seconds,
       c.created_at,
       c.last_message_at
     from public.chats c
@@ -1605,3 +1606,216 @@ returns json language sql stable security definer set search_path = public as $$
     order by m.created_at desc limit 500
   ) s;
 $$;
+
+-- ============================================================
+-- v0.1.10 CANONICAL — Stories (encrypted friend stories)
+--
+-- RECONCILIATION (audit 2026-10-25): this layer previously lived ONLY
+-- in patches/2026-10-24-v0110-stories.sql, so a fresh install from
+-- schema.sql alone was missing the stories tables/functions and broke
+-- on stories storage paths (unguarded uuid cast). It is now part of
+-- the canonical schema. Sections:
+--   A) is_direct_friend() — server definition of "friend"
+--   B) violet_stories / violet_story_wraps / violet_story_views + RLS
+--   C) media_chat_id() — regex-guarded uuid extraction (replaces the
+--      bare split_part cast used by the pre-v0.1.10 storage policies)
+--   D) hardened + story media storage policies
+--   E) purge_expired_stories()
+--   F) public downloads bucket (release APKs — referenced by
+--      verification-site/download.html, public by design)
+-- All statements are idempotent and safe to re-run.
+-- ============================================================
+
+-- ---------- A) friendship ----------
+create or replace function public.is_direct_friend(other uuid)
+returns boolean
+language sql
+security definer
+stable
+set search_path = public
+as $$
+  select exists (
+    select 1
+    from chats c
+    join chat_members a on a.chat_id = c.id and a.user_id = auth.uid()
+                        and a.left_at is null
+    join chat_members b on b.chat_id = c.id and b.user_id = other
+                        and b.left_at is null
+    where c.type = 'direct'
+      and c.deleted_at is null
+  );
+$$;
+
+-- ---------- B) stories tables + RLS ----------
+create table if not exists violet_stories (
+  id uuid primary key default gen_random_uuid(),
+  author_id uuid not null references profiles(id) on delete cascade,
+  body jsonb not null,
+  created_at timestamptz not null default now(),
+  expires_at timestamptz not null default (now() + interval '24 hours')
+);
+create index if not exists idx_stories_author on violet_stories(author_id, created_at desc);
+create index if not exists idx_stories_expiry on violet_stories(expires_at);
+
+create table if not exists violet_story_wraps (
+  story_id uuid not null references violet_stories(id) on delete cascade,
+  user_id uuid not null references profiles(id) on delete cascade,
+  device_id text not null,
+  wrapped text not null,
+  nonce text not null,
+  primary key (story_id, user_id, device_id)
+);
+create index if not exists idx_story_wraps_user on violet_story_wraps(user_id);
+
+create table if not exists violet_story_views (
+  story_id uuid not null references violet_stories(id) on delete cascade,
+  user_id uuid not null references profiles(id) on delete cascade,
+  viewed_at timestamptz not null default now(),
+  primary key (story_id, user_id)
+);
+
+alter table violet_stories enable row level security;
+alter table violet_story_wraps enable row level security;
+alter table violet_story_views enable row level security;
+
+drop policy if exists stories_insert_own on violet_stories;
+create policy stories_insert_own on violet_stories
+  for insert to authenticated
+  with check (author_id = auth.uid());
+
+drop policy if exists stories_select_ring on violet_stories;
+create policy stories_select_ring on violet_stories
+  for select to authenticated
+  using (author_id = auth.uid() or public.is_direct_friend(author_id));
+
+drop policy if exists stories_delete_own on violet_stories;
+create policy stories_delete_own on violet_stories
+  for delete to authenticated
+  using (author_id = auth.uid());
+
+drop policy if exists story_wraps_insert_own_story on violet_story_wraps;
+create policy story_wraps_insert_own_story on violet_story_wraps
+  for insert to authenticated
+  with check (
+    exists (select 1 from violet_stories s
+            where s.id = story_id and s.author_id = auth.uid())
+  );
+
+drop policy if exists story_wraps_select_mine on violet_story_wraps;
+create policy story_wraps_select_mine on violet_story_wraps
+  for select to authenticated
+  using (user_id = auth.uid());
+
+drop policy if exists story_views_insert_own on violet_story_views;
+create policy story_views_insert_own on violet_story_views
+  for insert to authenticated
+  with check (user_id = auth.uid());
+
+drop policy if exists story_views_select on violet_story_views;
+create policy story_views_select on violet_story_views
+  for select to authenticated
+  using (
+    user_id = auth.uid()
+    or exists (select 1 from violet_stories s
+               where s.id = story_id and s.author_id = auth.uid())
+  );
+
+-- ---------- C) guarded chat-id extraction ----------
+-- NOTE: this definition REPLACES the bare split_part cast the earlier
+-- media policies relied on; section D re-creates those policies so
+-- stories/ paths no longer error inside policy evaluation.
+create or replace function public.media_chat_id(p_name text)
+returns uuid
+language sql
+immutable
+as $$
+  select case
+    when p_name ~ '^media/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/'
+    then (split_part(p_name, '/', 2))::uuid
+  end;
+$$;
+
+-- ---------- D) hardened media + story media storage policies ----------
+drop policy if exists media_select_member on storage.objects;
+create policy media_select_member on storage.objects
+  for select to authenticated
+  using (
+    bucket_id = 'media'
+    and public.media_chat_id(name) is not null
+    and public.is_chat_member(public.media_chat_id(name), auth.uid())
+  );
+
+drop policy if exists media_insert_member on storage.objects;
+create policy media_insert_member on storage.objects
+  for insert to authenticated
+  with check (
+    bucket_id = 'media'
+    and split_part(name, '/', 3) = auth.uid()::text
+    and public.media_chat_id(name) is not null
+    and public.is_chat_member(public.media_chat_id(name), auth.uid())
+  );
+
+drop policy if exists media_delete_owner on storage.objects;
+create policy media_delete_owner on storage.objects
+  for delete to authenticated
+  using (
+    bucket_id = 'media'
+    and split_part(name, '/', 3) = auth.uid()::text
+  );
+
+drop policy if exists media_story_insert_own on storage.objects;
+create policy media_story_insert_own on storage.objects
+  for insert to authenticated
+  with check (
+    bucket_id = 'media'
+    and name like 'stories/' || auth.uid()::text || '/%'
+  );
+
+drop policy if exists media_story_select_ring on storage.objects;
+create policy media_story_select_ring on storage.objects
+  for select to authenticated
+  using (
+    bucket_id = 'media'
+    and (
+      name like 'stories/' || auth.uid()::text || '/%'
+      or (
+        name ~ '^stories/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/'
+        and public.is_direct_friend((split_part(name, '/', 3))::uuid)
+      )
+    )
+  );
+
+drop policy if exists media_story_delete_own on storage.objects;
+create policy media_story_delete_own on storage.objects
+  for delete to authenticated
+  using (
+    bucket_id = 'media'
+    and name like 'stories/' || auth.uid()::text || '/%'
+  );
+
+-- ---------- E) opportunistic story GC ----------
+create or replace function public.purge_expired_stories()
+returns int
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  deleted int;
+begin
+  delete from violet_stories where expires_at <= now();
+  get diagnostics deleted = row_count;
+  return deleted;
+end;
+$$;
+
+grant execute on function public.purge_expired_stories() to authenticated;
+grant execute on function public.is_direct_friend(uuid) to authenticated;
+
+-- ---------- F) public downloads bucket (release APKs) ----------
+-- Referenced by verification-site/download.html; objects are PUBLIC
+-- by design (installers, no secrets). The live project already has
+-- this bucket — this definition makes fresh installs match it.
+insert into storage.buckets (id, name, public, file_size_limit)
+values ('downloads', 'downloads', true, 209715200)
+on conflict (id) do update set public = true;

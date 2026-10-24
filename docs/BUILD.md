@@ -49,20 +49,25 @@ AOT + النظام) تبقى داخل الذاكرة الفعلية، ويبقى
 3. Build → APK.
 
 ## التوقيع
-- **منذ بداية المشروع**: `android/app/nexora-release.jks` (alias `nexora`) +
-  `android/key.properties` تُتتبّع في هذا المستودع الخاص — أي بناء
-  محلي أو CI يوقّع بمفتاح الإصدار نفسه تلقائيًا بلا أي إعداد إضافي
-  (القرار والمقايضة الأمنية في SECURITY.md §6).
-  SHA-256 الشهادة:
+- **الوضع الحالي (محدّث — تصحيح ادعاء قديم)**: المستودع **عام** ولا
+  يحتوي أي ملف keystore — لا `nexora-release.jks` ولا
+  `android/key.properties` (تم التحقق آلياً من كامل تاريخ Git).
+  التوقيع يعتمد حصراً على GitHub Actions Secrets:
+  - `ANDROID_KEYSTORE_B64` — keystore الإصدار بترميز base64
+  - `ANDROID_KEY_PROPERTIES` — محتوى key.properties (store/key كلمة
+    المرور + alias)
+  ويكتبهما الـ workflow إلى القرص وقت البناء فقط، ثم يتحقق من بصمة
+  شهادة SHA-256 قبل نشر أي إصدار (build-release.yml).
+  SHA-256 الشهادة المنشورة:
   `AE:74:AD:D0:9A:58:F8:06:3A:B4:5E:18:C1:B9:9E:9E:13:52:AC:F2:F4:6A:F6:77:89:D7:4F:09:7E:44:FA:6B`
-- CI (اختياري): إن ضُبطت Secrets (`ANDROID_KEYSTORE_B64` + كلمات
-  المرور) فستكتب فوق الملفات المتتبعة وتُستخدم بدلاً منها.
-- لتوليد keystore خاص بك بدلاً من المرفق:
+- بناء محلي بلا Secrets: Gradle يسقط إلى مفتاح debug (مناسب للاختبار
+  فقط، عمداً موثق في app/build.gradle).
+- لتوليد keystore خاص بك (لا ترفعه للمستودع إطلاقاً):
 ```bash
 keytool -genkeypair -v -keystore nexora-release.jks -alias nexora \
   -keyalg RSA -keysize 2048 -validity 10000
 ```
-ثم أنشئ `android/key.properties`:
+ثم أنشئ `android/key.properties` محلياً:
 ```
 storeFile=nexora-release.jks
 storePassword=...
