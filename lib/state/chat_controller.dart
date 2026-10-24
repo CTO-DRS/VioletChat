@@ -366,9 +366,16 @@ class ChatController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// v0.1.13 — [viewOnce] marks the media as one-view (image/video/
+  /// audio): the receiver's client hides the content after the first
+  /// view and wipes the decrypted payload from the local cache. The
+  /// flag lives INSIDE the ciphertext — the server cannot tell.
   Future<void> sendMedia(MediaUploadResult media,
-      {String? caption, String? forwardedFrom}) async {
-    final m = await services.sync.enqueueMedia(chat, media.toMediaInfo(),
+      {String? caption,
+      String? forwardedFrom,
+      bool viewOnce = false}) async {
+    final m = await services.sync.enqueueMedia(
+        chat, media.toMediaInfo(once: viewOnce),
         caption: caption,
         replyTo: replyTo?.id,
         replyPreview: '📎 ${media.type}',

@@ -37,6 +37,9 @@ Flutter + Firebase Authentication + Cloud Firestore + Supabase (نقل
 | مشاركة موقع مشفرة (GPS + خريطة OSM، إحداثيات داخل التشفير) | IMPLEMENTED (v0.1.12) — NOT VERIFIED ميدانياً |
 | بطاقات جهات اتصال مشفرة (لمسة تفتح المحادثة) | IMPLEMENTED (v0.1.12) — NOT VERIFIED ميدانياً |
 | تنسيق نص الرسائل (غامق/مائل/شطب/كود — محلي صرف) | IMPLEMENTED (v0.1.12) — NOT VERIFIED ميدانياً |
+| وسائط الرؤية الواحدة (صور/فيديو/صوت — العلم داخل التشفير، محو الكاش بعد المشاهدة، حظر التوجيه، خارج المعرض) | IMPLEMENTED (v0.1.13) — NOT VERIFIED ميدانياً |
+| البحث داخل المحادثة (قفز للنتائج + تطبيع عربي متسامح — محلي صرف فوق الكاش المفكوك) | IMPLEMENTED (v0.1.13) — NOT VERIFIED ميدانياً |
+| سرعات تشغيل الرسائل الصوتية (1×/1.5×/2×) | IMPLEMENTED (v0.1.13) — NOT VERIFIED ميدانياً |
 | مكالمات WebRTC ثنائية + جماعية (mesh ≤ 8) | IMPLEMENTED — NOT VERIFIED ميدانياً |
 | أوفلاين + مزامنة | IMPLEMENTED — NOT VERIFIED ميدانياً |
 | Realtime + مؤشر الكتابة + حضور «متصل الآن» | IMPLEMENTED — NOT VERIFIED ميدانياً |

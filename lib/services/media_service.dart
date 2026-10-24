@@ -188,7 +188,9 @@ class MediaUploadResult {
     this.thumbNonce,
   });
 
-  MediaInfo toMediaInfo() => MediaInfo(
+  /// v0.1.13 — [once] threads the view-once flag into the encrypted
+  /// MediaInfo payload (server-blind; see MediaInfo.once).
+  MediaInfo toMediaInfo({bool once = false}) => MediaInfo(
         type: type,
         path: path,
         size: size,
@@ -202,5 +204,6 @@ class MediaUploadResult {
         thumbPath: thumbPath,
         thumbKey: thumbKey,
         thumbNonce: thumbNonce,
+        once: once,
       );
 }

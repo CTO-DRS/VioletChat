@@ -249,6 +249,12 @@ class MediaInfo {
   final String? thumbKey;
   final String? thumbNonce;
 
+  /// v0.1.13 — view-once media (صور/فيديو/صوت تختفي بعد أول مشاهدة).
+  /// The flag travels INSIDE the ciphertext (the server sees kind='media'
+  /// only). Old builds ignore the unknown 'once' key and render the
+  /// media normally — graceful degradation, never a crash.
+  final bool once;
+
   const MediaInfo({
     required this.type,
     required this.path,
@@ -263,6 +269,7 @@ class MediaInfo {
     this.thumbPath,
     this.thumbKey,
     this.thumbNonce,
+    this.once = false,
   });
 
   Map<String, dynamic> toJson() => {
@@ -279,6 +286,7 @@ class MediaInfo {
         if (thumbPath != null) 'thumb': thumbPath,
         if (thumbKey != null) 'tkey': thumbKey,
         if (thumbNonce != null) 'tnonce': thumbNonce,
+        if (once) 'once': true,
       };
 
   static MediaInfo? fromJson(Map<String, dynamic>? j) {
@@ -297,6 +305,7 @@ class MediaInfo {
       thumbPath: j['thumb'] as String?,
       thumbKey: j['tkey'] as String?,
       thumbNonce: j['tnonce'] as String?,
+      once: j['once'] == true,
     );
   }
 }

@@ -25,6 +25,8 @@ import '../../core/utils/disappearing_policy.dart';
 import '../../core/utils/poll_tally.dart';
 import '../../core/utils/smart_date.dart';
 import '../../core/utils/text_format.dart';
+import '../../core/utils/playback_speed.dart';
+import '../../core/utils/view_once.dart';
 import '../../data/models/models.dart';
 import '../../routing/app_router.dart';
 import '../../services/chat_export_service.dart';
@@ -70,6 +72,21 @@ class _ChatScreenState extends State<ChatScreen> {
   bool _didInitialJump = false;
   bool _loadingOlderLocally = false;
 
+  // v0.1.13 — view-once media (وسائط الرؤية الواحدة). The armed flag
+  // is a ValueNotifier so the attach-sheet switch rebuilds without a
+  // StatefulBuilder wrapper; it is one-shot (consumed by the next
+  // image/video/audio send).
+  final Set<String> _viewedOnce = <String>{};
+  final ValueNotifier<bool> _viewOnceArmedN = ValueNotifier<bool>(false);
+  bool get _viewOnceArmed => _viewOnceArmedN.value;
+
+  // v0.1.13 — in-chat search (jump-style, like the big messengers).
+  bool _searchOpen = false;
+  final _searchCtrl = TextEditingController();
+  Timer? _searchDebounce;
+  List<String> _searchHits = [];
+  int _searchCursor = -1;
+
   // v0.1.0: per-chat draft persistence (encrypted, local only).
   Timer? _draftTimer;
   // v0.1.0: tap-to-jump on reply quotes + flash highlight.
@@ -96,6 +113,140 @@ class _ChatScreenState extends State<ChatScreen> {
     _scroll.addListener(_onScroll);
     _loadMembers();
     _restoreDraft();
+    // v0.1.13 — which once-media did THIS device already view?
+    unawaited(_loadViewedOnce());
+  }
+
+  // ===================================================================
+  // v0.1.13 — view-once media (وسائط الرؤية الواحدة)
+  // ===================================================================
+  Future<void> _loadViewedOnce() async {
+    try {
+      final ids = await ViewOnce.viewedIds();
+      if (!mounted || ids.isEmpty) return;
+      setState(() => _viewedOnce.addAll(ids));
+    } catch (_) {
+      // If the registry fails, tombstones simply re-show once more.
+    }
+  }
+
+  /// First view completed (image viewer closed, video popped, audio
+  /// finished or paused): persist it, wipe the decrypted payload from
+  /// the local cache (blob key included), and collapse the bubble to
+  /// a tombstone. Idempotent by design.
+  Future<void> _markOnceViewed(String messageId) async {
+    if (_viewedOnce.contains(messageId)) return;
+    _viewedOnce.add(messageId);
+    if (mounted) setState(() {});
+    try {
+      await ViewOnce.markViewed(messageId);
+      await _services.cache.applyOnceViewed(messageId);
+    } catch (_) {}
+  }
+
+  void _openOnceImage(Message m) {
+    final media = m.media;
+    if (media == null) return;
+    showDialog<void>(
+      context: context,
+      barrierColor: Colors.black.withValues(alpha: 0.94),
+      builder: (_) => Dialog.fullscreen(
+        backgroundColor: Colors.black,
+        child: _ImageViewer(media: media, services: _services),
+      ),
+    ).then((_) => unawaited(_markOnceViewed(m.id)));
+  }
+
+  Future<void> _openOnceVideo(Message m) async {
+    final media = m.media;
+    if (media == null) return;
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => _OnceVideoViewer(media: media, services: _services),
+    );
+    await _markOnceViewed(m.id);
+  }
+
+  // ===================================================================
+  // v0.1.13 — in-chat search (البحث داخل المحادثة)
+  // ===================================================================
+  void _openSearch() {
+    setState(() {
+      _searchOpen = true;
+      _searchHits = [];
+      _searchCursor = -1;
+    });
+  }
+
+  void _closeSearch() {
+    _searchDebounce?.cancel();
+    _searchCtrl.clear();
+    setState(() {
+      _searchOpen = false;
+      _searchHits = [];
+      _searchCursor = -1;
+    });
+  }
+
+  void _onSearchChanged(String v) {
+    _searchDebounce?.cancel();
+    _searchDebounce =
+        Timer(const Duration(milliseconds: 320), () => _runSearch(v));
+  }
+
+  Future<void> _runSearch(String v) async {
+    final q = v.trim();
+    if (q.isEmpty) {
+      if (mounted) {
+        setState(() {
+          _searchHits = [];
+          _searchCursor = -1;
+        });
+      }
+      return;
+    }
+    try {
+      // Full-history scan over the decrypted local cache — not just
+      // the loaded window (E2E: the server cannot search for us).
+      final hits = await _services.cache.searchInChat(widget.chat.id, q);
+      if (!mounted) return;
+      setState(() {
+        _searchHits = hits.map((m) => m.id).toList();
+        // Land on the NEWEST match first (list is oldest → newest).
+        _searchCursor = _searchHits.isEmpty ? -1 : _searchHits.length - 1;
+      });
+      await _goToCurrentHit();
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _searchHits = [];
+          _searchCursor = -1;
+        });
+      }
+    }
+  }
+
+  Future<void> _goToCurrentHit() async {
+    if (_searchCursor < 0 || _searchCursor >= _searchHits.length) return;
+    await _jumpToMessage(_searchHits[_searchCursor]);
+  }
+
+  /// ↓ older occurrence.
+  Future<void> _olderHit() async {
+    if (_searchHits.isEmpty) return;
+    setState(() =>
+        _searchCursor = (_searchCursor - 1 + _searchHits.length) %
+            _searchHits.length);
+    await _goToCurrentHit();
+  }
+
+  /// ↑ newer occurrence.
+  Future<void> _newerHit() async {
+    if (_searchHits.isEmpty) return;
+    setState(()
+        => _searchCursor = (_searchCursor + 1) % _searchHits.length);
+    await _goToCurrentHit();
   }
 
   Future<void> _restoreDraft() async {
@@ -155,6 +306,9 @@ class _ChatScreenState extends State<ChatScreen> {
     _recTimer?.cancel();
     _recSw.stop();
     _recorder?.dispose();
+    _searchDebounce?.cancel();
+    _searchCtrl.dispose();
+    _viewOnceArmedN.dispose();
     _textCtrl.dispose();
     _scroll.dispose();
     _controller?.dispose();
@@ -384,7 +538,9 @@ class _ChatScreenState extends State<ChatScreen> {
         width: w,
         height: h,
       );
-      await _c.sendMedia(result);
+      await _c.sendMedia(result, viewOnce: _viewOnceArmed);
+      // v0.1.13 — one-shot: the flag is consumed by this send.
+      _viewOnceArmedN.value = false;
       _jumpToBottom();
     } on AppException catch (e) {
       _err(e.message);
@@ -630,10 +786,18 @@ class _ChatScreenState extends State<ChatScreen> {
   // ===================================================================
   bool _canForward(Message m) =>
       !m.isDeletedForAll &&
+      // v0.1.13 — view-once media never leaves the chat transcript.
+      !(m.media?.once ?? false) &&
       ((m.kind == 'text' && (m.text ?? '').trim().isNotEmpty) ||
           m.media != null);
 
   Future<void> _forwardMessage(Message m) async {
+    // v0.1.13 — belt-and-suspenders: the sheet hides the option via
+    // _canForward; this also guards every other call path.
+    if (m.media?.once ?? false) {
+      _snack('وسائط المشاهدة الواحدة لا يمكن إعادة توجيهها');
+      return;
+    }
     final chats = context.read<ChatsController>().chats;
     final target = await showModalBottomSheet<Chat>(
       context: context,
@@ -1017,7 +1181,7 @@ class _ChatScreenState extends State<ChatScreen> {
     return Directionality(
       textDirection: ui.TextDirection.rtl,
       child: Scaffold(
-        appBar: _appBar(),
+        appBar: _searchOpen ? _searchAppBar() : _appBar(),
         body: Column(
           children: [
             _pinnedBanner(),
@@ -1327,6 +1491,12 @@ class _ChatScreenState extends State<ChatScreen> {
         ),
       ),
       actions: [
+        // v0.1.13 — in-chat search entry point.
+        IconButton(
+          tooltip: 'بحث في المحادثة',
+          icon: const Icon(Icons.search),
+          onPressed: _openSearch,
+        ),
         if (AppConfig.enableCalls && !widget.chat.isGroup)
           IconButton(
             tooltip: 'مكالمة',
@@ -1392,6 +1562,52 @@ class _ChatScreenState extends State<ChatScreen> {
           ],
         ),
         const SizedBox(width: 4),
+      ],
+    );
+  }
+
+  /// v0.1.13 — the search-mode app bar: query field + hit counter +
+  /// older/newer navigation. Lives in the same AppBar slot so the
+  /// transcript below stays interactive while jumping between hits.
+  PreferredSizeWidget _searchAppBar() {
+    return AppBar(
+      leading: IconButton(
+        icon: const Icon(Icons.arrow_forward),
+        onPressed: _closeSearch,
+      ),
+      titleSpacing: 0,
+      title: TextField(
+        controller: _searchCtrl,
+        autofocus: true,
+        onChanged: _onSearchChanged,
+        onSubmitted: _runSearch,
+        textInputAction: TextInputAction.search,
+        decoration: const InputDecoration(
+          hintText: 'ابحث في هذه المحادثة',
+          border: InputBorder.none,
+        ),
+      ),
+      actions: [
+        if (_searchHits.isNotEmpty)
+          Padding(
+            padding: const EdgeInsetsDirectional.only(start: 2),
+            child: Center(
+              child: Text(
+                '${_searchCursor + 1} / ${_searchHits.length}',
+                style: const TextStyle(fontSize: 13),
+              ),
+            ),
+          ),
+        IconButton(
+          tooltip: 'أحدث (أعلى)',
+          icon: const Icon(Icons.keyboard_arrow_up),
+          onPressed: _searchHits.isEmpty ? null : _newerHit,
+        ),
+        IconButton(
+          tooltip: 'أقدم (أسفل)',
+          icon: const Icon(Icons.keyboard_arrow_down),
+          onPressed: _searchHits.isEmpty ? null : _olderHit,
+        ),
       ],
     );
   }
@@ -1821,6 +2037,20 @@ class _ChatScreenState extends State<ChatScreen> {
     }
     final media = m.media;
     if (media == null || m.isDeletedForAll) return;
+    // v0.1.13 — view-once routing (receiver side).
+    final mine = m.senderId == _c.myId;
+    if (media.once && !mine) {
+      if (_viewedOnce.contains(m.id)) return; // tombstone — inert.
+      if (media.type == 'image') {
+        _openOnceImage(m);
+        return;
+      }
+      if (media.type == 'video') {
+        unawaited(_openOnceVideo(m));
+        return;
+      }
+      return; // audio manages its own playback gate.
+    }
     if (media.type == 'image') _openImageViewer(media);
   }
 
@@ -1914,17 +2144,103 @@ class _ChatScreenState extends State<ChatScreen> {
   Widget _mediaContent(Message m, bool mine) {
     final media = m.media;
     if (media == null) return const SizedBox.shrink();
+    // v0.1.13 — view-once gating (receiver side): unviewed → locked
+    // tile (nothing is downloaded until the tap), viewed → tombstone.
+    // The sender keeps a normal preview with a «رؤية واحدة» badge.
+    final once = media.once;
+    final viewed = _viewedOnce.contains(m.id);
+    if (once && !mine) {
+      if (viewed) return _onceViewedTile();
+      switch (media.type) {
+        case 'image':
+          return _OnceTile(
+            icon: Icons.image_rounded,
+            label: 'صورة — اضغط للمشاهدة مرة واحدة',
+            onTap: () => _openOnceImage(m),
+          );
+        case 'video':
+          return _OnceTile(
+            icon: Icons.videocam_rounded,
+            label: 'فيديو — اضغط للمشاهدة مرة واحدة',
+            onTap: () => unawaited(_openOnceVideo(m)),
+          );
+        case 'audio':
+          return _AudioBubble(
+            media: media,
+            services: _services,
+            mine: mine,
+            once: true,
+            onViewed: () => unawaited(_markOnceViewed(m.id)),
+          );
+      }
+    }
+    Widget content;
     switch (media.type) {
       case 'image':
-        return _ImageBubble(media: media, services: _services, mine: mine);
+        content = _ImageBubble(media: media, services: _services, mine: mine);
       case 'audio':
-        return _AudioBubble(media: media, services: _services, mine: mine);
+        content = _AudioBubble(media: media, services: _services, mine: mine);
       case 'video':
-        return _VideoBubble(media: media, services: _services, mine: mine);
+        content = _VideoBubble(media: media, services: _services, mine: mine);
       case 'file':
       default:
-        return _FileCard(media: media, services: _services, mine: mine);
+        content = _FileCard(media: media, services: _services, mine: mine);
     }
+    if (once && mine) {
+      return Padding(
+        padding: const EdgeInsetsDirectional.only(bottom: 4),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.visibility_rounded,
+                    size: 12, color: Colors.white70),
+                const SizedBox(width: 4),
+                const Text('رؤية واحدة',
+                    style: TextStyle(fontSize: 10, color: Colors.white70)),
+              ],
+            ),
+            const SizedBox(height: 4),
+            content,
+          ],
+        ),
+      );
+    }
+    return content;
+  }
+
+  /// v0.1.13 — tombstone after the single view: the decrypted payload
+  /// is wiped from the cache, so this is all that remains.
+  Widget _onceViewedTile() {
+    final fg = Theme.of(context).colorScheme.onSurface;
+    return Container(
+      width: 220,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+      decoration: BoxDecoration(
+        color: Colors.black12,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.visibility_off_rounded,
+              size: 18, color: fg.withValues(alpha: 0.7)),
+          const SizedBox(width: 8),
+          Flexible(
+            child: Text(
+              'وسائط المشاهدة الواحدة — تمت المشاهدة',
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.right,
+              style: TextStyle(fontSize: 11, color: fg.withValues(alpha: 0.8)),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   /// v0.1.12 — تنسيق نص الرسالة (غامق/مائل/شطب/كود) بتحليل محلي
@@ -2343,6 +2659,23 @@ class _ChatScreenState extends State<ChatScreen> {
                 ],
               ),
               const SizedBox(height: 10),
+              // v0.1.13 — view-once arming switch (one-shot: consumed
+              // by the next image/video/audio send; files unaffected).
+              ValueListenableBuilder<bool>(
+                valueListenable: _viewOnceArmedN,
+                builder: (ctx, armed, _) => SwitchListTile(
+                  value: armed,
+                  onChanged: (v) => _viewOnceArmedN.value = v,
+                  contentPadding: EdgeInsets.zero,
+                  secondary: const Icon(Icons.visibility_off_rounded,
+                      color: AppTheme.brandSecondary),
+                  title: const Text('وسائط بمشاهدة واحدة',
+                      style: TextStyle(fontWeight: FontWeight.w600)),
+                  subtitle: const Text(
+                      'الصور والفيديو والصوت تُخفى عند المستلم بعد أول مشاهدة'),
+                ),
+              ),
+              const SizedBox(height: 10),
               // v0.1.10: encrypted poll — one full-width tile below the
               // media grid (mockup keeps the 3-column media row intact).
               _attachTile(
@@ -2485,6 +2818,165 @@ Widget _sheetTile(IconData icon, String label, VoidCallback onTap,
 // =====================================================================
 // Image bubble (encrypted thumbnail, lazy download)
 // =====================================================================
+
+/// v0.1.13 — locked tile for UNVIEWED view-once media (image/video).
+/// Pure chrome (icon + text): nothing is downloaded until the tap —
+/// even the thumbnail could leak content, so this tile deliberately
+/// touches no bytes of the encrypted blob.
+class _OnceTile extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+  const _OnceTile(
+      {required this.icon, required this.label, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final fg = Theme.of(context).colorScheme.onSurface;
+    return Padding(
+      padding: const EdgeInsetsDirectional.only(top: 2, bottom: 2),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: onTap,
+        child: Container(
+          width: 220,
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 16),
+          decoration: BoxDecoration(
+            color: Colors.black12,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: fg.withValues(alpha: 0.12)),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 34, color: fg.withValues(alpha: 0.85)),
+              const SizedBox(height: 8),
+              Text(
+                label,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: fg),
+              ),
+              const SizedBox(height: 3),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.visibility_rounded,
+                      size: 12, color: fg.withValues(alpha: 0.6)),
+                  const SizedBox(width: 4),
+                  Text('تختفي بعد أول مشاهدة',
+                      style: TextStyle(
+                          fontSize: 10, color: fg.withValues(alpha: 0.6))),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// v0.1.13 — one-shot fullscreen video viewer for view-once media.
+/// Decrypts to a private temp file and autoplays once; the chat screen
+/// marks the message viewed when this route pops (success or failure —
+/// the attempt itself consumed the view).
+class _OnceVideoViewer extends StatefulWidget {
+  final MediaInfo media;
+  final AppServices services;
+  const _OnceVideoViewer({required this.media, required this.services});
+
+  @override
+  State<_OnceVideoViewer> createState() => _OnceVideoViewerState();
+}
+
+class _OnceVideoViewerState extends State<_OnceVideoViewer> {
+  VideoPlayerController? _ctrl;
+  bool _loading = true;
+  bool _failed = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _prepare();
+  }
+
+  Future<void> _prepare() async {
+    try {
+      final m = widget.media;
+      final bytes = await widget.services.mediaService.downloadDecrypted(
+        path: m.path,
+        fileKeyB64: m.fileKey,
+        fileNonceB64: m.fileNonce,
+      );
+      final dir = await Directory.systemTemp.createTemp('violet_once');
+      final ext = m.name != null && m.name!.contains('.')
+          ? m.name!.substring(m.name!.lastIndexOf('.'))
+          : '.mp4';
+      final file = File('${dir.path}/once$ext');
+      await file.writeAsBytes(bytes, flush: true);
+      final ctrl = VideoPlayerController.file(file);
+      await ctrl.initialize();
+      if (!mounted) {
+        await ctrl.dispose();
+        return;
+      }
+      setState(() {
+        _ctrl = ctrl;
+        _loading = false;
+      });
+      await ctrl.play();
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _failed = true;
+          _loading = false;
+        });
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _ctrl?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        foregroundColor: Colors.white,
+        elevation: 0,
+        leading: IconButton(
+          icon: const Icon(Icons.close),
+          onPressed: () => Navigator.of(context).pop(),
+        ),
+        title: const Text('فيديو — مشاهدة واحدة',
+            style: TextStyle(fontSize: 15)),
+      ),
+      body: Center(
+        child: _loading
+            ? const CircularProgressIndicator()
+            : _failed
+                ? const Text('تعذر فك تشفير الفيديو',
+                    style: TextStyle(color: Colors.white70))
+                : AspectRatio(
+                    aspectRatio: _ctrl!.value.aspectRatio == 0
+                        ? 16 / 9
+                        : _ctrl!.value.aspectRatio,
+                    child: VideoPlayer(_ctrl!),
+                  ),
+      ),
+    );
+  }
+}
 
 class _ImageBubble extends StatefulWidget {
   final MediaInfo media;
@@ -2675,8 +3167,19 @@ class _AudioBubble extends StatefulWidget {
   final MediaInfo media;
   final AppServices services;
   final bool mine;
+
+  /// v0.1.13 — view-once playback: after the note completes OR is
+  /// paused, [onViewed] fires once and the chat screen collapses the
+  /// bubble to a tombstone. Sender notes never set this.
+  final bool once;
+  final VoidCallback? onViewed;
+
   const _AudioBubble(
-      {required this.media, required this.services, required this.mine});
+      {required this.media,
+      required this.services,
+      required this.mine,
+      this.once = false,
+      this.onViewed});
 
   @override
   State<_AudioBubble> createState() => _AudioBubbleState();
@@ -2692,6 +3195,26 @@ class _AudioBubbleState extends State<_AudioBubble> {
   bool _loading = false;
   double _progress = 0;
 
+  // v0.1.13 — playback speed (1× → 1.5× → 2× → 1×).
+  double _speed = 1.0;
+  // v0.1.13 — view-once gate (fires at most once).
+  bool _onceFired = false;
+
+  void _fireOnceViewed() {
+    if (_onceFired) return;
+    _onceFired = true;
+    widget.onViewed?.call();
+  }
+
+  Future<void> _cycleSpeed() async {
+    setState(() => _speed = nextPlaybackSpeed(_speed));
+    try {
+      await _player?.setSpeed(_speed);
+    } catch (_) {
+      // Speed is a nicety — playback continues at the current rate.
+    }
+  }
+
   String get _durationLabel {
     final ms = widget.media.durationMs ?? 0;
     if (ms <= 0) return '';
@@ -2703,9 +3226,14 @@ class _AudioBubbleState extends State<_AudioBubble> {
 
   Future<void> _toggle() async {
     if (_loading) return;
+    // v0.1.13 — view-once: once consumed, the parent swaps this widget
+    // for a tombstone; until then further plays are refused.
+    if (widget.once && _onceFired) return;
     if (_playing) {
       await _player?.pause();
       if (mounted) setState(() => _playing = false);
+      // Pausing mid-note still counts as having heard it.
+      if (widget.once) _fireOnceViewed();
       return;
     }
     try {
@@ -2724,6 +3252,8 @@ class _AudioBubbleState extends State<_AudioBubble> {
           BytesAudioSource(_bytes!, mimeType: widget.media.mime),
         );
         _loaded = true;
+        // v0.1.13 — apply the selected speed to the fresh source.
+        await player.setSpeed(_speed);
       }
       _posSub ??= player.positionStream.listen((p) {
         if (!mounted) return;
@@ -2743,6 +3273,8 @@ class _AudioBubbleState extends State<_AudioBubble> {
             _progress = 0;
           });
           player.seek(Duration.zero);
+          // v0.1.13 — the note was heard to the end.
+          if (widget.once) _fireOnceViewed();
         } else {
           final playing = st.playing &&
               st.processingState != ProcessingState.loading &&
@@ -2790,7 +3322,7 @@ class _AudioBubbleState extends State<_AudioBubble> {
     return Padding(
       padding: const EdgeInsetsDirectional.only(top: 2, bottom: 2),
       child: SizedBox(
-        width: 210,
+        width: 236,
         child: Row(
           children: [
             GestureDetector(
@@ -2833,6 +3365,27 @@ class _AudioBubbleState extends State<_AudioBubble> {
                     style: TextStyle(fontSize: 10, color: labelColor),
                   ),
                 ],
+              ),
+            ),
+            // v0.1.13 — playback speed chip (1× / 1.5× / 2×).
+            InkWell(
+              onTap: _cycleSpeed,
+              borderRadius: BorderRadius.circular(8),
+              child: Container(
+                margin: const EdgeInsetsDirectional.only(start: 6),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
+                decoration: BoxDecoration(
+                  color: iconBg,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  playbackSpeedLabel(_speed),
+                  style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      color: iconColor),
+                ),
               ),
             ),
           ],

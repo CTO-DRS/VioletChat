@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:sqflite/sqflite.dart';
 
 import '../config/app_config.dart';
+import '../utils/message_search.dart';
 import 'local_database.dart';
 import '../../data/models/models.dart';
 
@@ -90,6 +91,22 @@ class MessageCache {
     );
   }
 
+  /// v0.1.13 — view-once media was just viewed on THIS device: drop
+  /// the decrypted media payload (blob key + nonce included) from the
+  /// local cache. The row itself survives (ordering, caption, meta),
+  /// but the content can never be re-rendered — the bubble shows a
+  /// tombstone, the gallery excludes the row, and the encrypted blob
+  /// key no longer sits in the device database.
+  Future<void> applyOnceViewed(String messageId) async {
+    final db = await LocalDatabase.instance;
+    await db.update(
+      'messages_cache',
+      {'media_json': null},
+      where: 'id = ? OR client_msg_id = ?',
+      whereArgs: [messageId, messageId],
+    );
+  }
+
   /// Cursor pagination — [beforeIso] null => latest page.
   /// Returns ASC order (oldest -> newest).
   Future<List<Message>> page(String chatId, {String? beforeIso}) async {
@@ -154,6 +171,9 @@ class MessageCache {
 
   /// v0.1.0 — cached media rows of a chat (newest first), for the
   /// in-chat media gallery.
+  /// v0.1.13 — view-once rows are EXCLUDED from the gallery for
+  /// everyone (sender included): the gallery is a persistent surface,
+  /// and once-media must never live outside the chat transcript.
   Future<List<Message>> media(String chatId, {int limit = 300}) async {
     final db = await LocalDatabase.instance;
     final rows = await db.query('messages_cache',
@@ -162,7 +182,36 @@ class MessageCache {
         whereArgs: [chatId, 'media'],
         orderBy: 'created_at DESC',
         limit: limit);
-    return rows.map(_fromRow).whereType<Message>().toList();
+    return rows
+        .map(_fromRow)
+        .whereType<Message>()
+        .where((m) => !(m.media?.once ?? false))
+        .toList();
+  }
+
+  /// v0.1.13 — in-chat search over the decrypted local cache
+  /// (البحث داخل المحادثة). Scans EVERY cached row of the chat — not
+  /// just the loaded window — with the tolerant Arabic normalization
+  /// (messageMatchesQuery), and returns matches oldest → newest.
+  /// The server stores none of this text (E2E); search is a purely
+  /// local capability.
+  Future<List<Message>> searchInChat(String chatId, String rawQuery,
+      {int limit = 200}) async {
+    final q = rawQuery.trim();
+    if (q.isEmpty) return [];
+    final db = await LocalDatabase.instance;
+    final rows = await db.query(
+      'messages_cache',
+      where: 'chat_id = ? AND deleted_for_all = 0',
+      whereArgs: [chatId],
+      orderBy: 'created_at ASC',
+      limit: limit,
+    );
+    return rows
+        .map(_fromRow)
+        .whereType<Message>()
+        .where((m) => messageMatchesQuery(m, q))
+        .toList();
   }
 
   Future<List<Message>> search(String query, {int limit = 50}) async {
