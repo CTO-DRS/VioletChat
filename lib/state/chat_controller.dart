@@ -151,16 +151,19 @@ class ChatController extends ChangeNotifier {
     messages = mergeWindow(messages, latest);
   }
 
-  /// Pure, testable window merge: the latest page stays in front,
-  /// already-loaded older messages are preserved behind it, newest
-  /// first ordering (created_at DESC) is kept, ids dedupe.
+  /// Pure, testable window merge: already-loaded older history stays
+  /// in front (top), the refreshed latest page follows behind it —
+  /// matching the app-wide ASCENDING display convention (oldest at
+  /// top, newest at bottom) used by cache.page() (reversed DESC→ASC),
+  /// loadOlder() (prepends) and the ListView (index 0 at top).
+  /// Ids dedupe.
   static List<Message> mergeWindow(
       List<Message> loaded, List<Message> latestPage) {
     if (latestPage.isEmpty) return loaded;
     final latestIds = latestPage.map((m) => m.id).toSet();
     final older = loaded.where((m) => !latestIds.contains(m.id)).toList();
     if (older.isEmpty) return latestPage;
-    return [...latestPage, ...older];
+    return [...older, ...latestPage];
   }
 
   /// Jump back to the newest window (chip / auto after send).

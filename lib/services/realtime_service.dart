@@ -120,10 +120,23 @@ class RealtimeService {
 
   Future<void> stop() async {
     await _reconnectSub?.cancel();
-    await client.removeChannel(_dbChannel!);
-    await client.removeChannel(_typingChannel!);
+    // FIX (audit 2026-10-25): null-safe — the old `removeChannel(_dbChannel!)`
+    // crashed when stop() was called before the channels were opened (or
+    // after a failed start).
+    final db = _dbChannel;
+    final typing = _typingChannel;
     _dbChannel = null;
     _typingChannel = null;
+    if (db != null) {
+      try {
+        await client.removeChannel(db);
+      } catch (_) {}
+    }
+    if (typing != null) {
+      try {
+        await client.removeChannel(typing);
+      } catch (_) {}
+    }
   }
 
   static bool get callsEnabled => AppConfig.enableCalls;

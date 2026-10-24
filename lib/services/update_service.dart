@@ -67,19 +67,15 @@ class UpdateService {
   /// نتيجة الفحص الناجحة.
   static Future<UpdateInfo?> checkLatest({String? currentVersion}) async {
     final cur = currentVersion ?? AppConfig.appVersion;
+    final client = HttpClient()..connectionTimeout = const Duration(seconds: 8);
     try {
-      final client = HttpClient()..connectionTimeout = const Duration(seconds: 8);
       final req = await client.getUrl(Uri.parse(
           'https://api.github.com/repos/$repoOwner/$repoName/releases/latest'));
       req.headers.set('Accept', 'application/vnd.github+json');
       req.headers.set('User-Agent', 'VioletChat-App');
       final res = await req.close().timeout(const Duration(seconds: 10));
-      if (res.statusCode != 200) {
-        client.close();
-        return null;
-      }
+      if (res.statusCode != 200) return null;
       final body = await res.transform(utf8.decoder).join();
-      client.close();
       final json = jsonDecode(body) as Map<String, dynamic>;
       final tag = (json['tag_name'] as String?) ?? '';
       final url = (json['html_url'] as String?) ??
@@ -92,6 +88,10 @@ class UpdateService {
       );
     } catch (_) {
       return null; // صامت — بلا إزعاج عند غياب الشبكة
+    } finally {
+      // FIX (audit 2026-10-25): close in finally — the old path leaked
+      // the HttpClient whenever any step threw before the explicit close.
+      client.close();
     }
   }
 

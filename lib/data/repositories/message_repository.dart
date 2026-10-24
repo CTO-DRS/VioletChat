@@ -83,7 +83,12 @@ class MessageRepository {
       client.from('message_hides').insert({'message_id': messageId});
 
   Future<List<String>> hiddenMessageIds(String chatId) async {
-    final rows = await client.from('message_hides').select('message_id');
+    // FIX (audit 2026-10-25): filter by chat — the old version ignored
+    // its parameter and returned EVERY hide row across ALL chats.
+    final rows = await client
+        .from('message_hides')
+        .select('message_id, messages!inner(chat_id)')
+        .eq('messages.chat_id', chatId);
     return (rows as List).map((e) => e['message_id'] as String).toList();
   }
 

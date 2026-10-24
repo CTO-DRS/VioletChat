@@ -27,16 +27,32 @@ class ChatsController extends ChangeNotifier {
   bool loading = false;
   bool online = true;
   StreamSubscription? _subs;
+  StreamSubscription? _connectivitySub;
+  StreamSubscription? _chatSub;
+  StreamSubscription? _receiptSub;
+  bool _started = false;
 
+  /// Idempotent by contract (fix: audit 2026-10-25) — safe to call on
+  /// every AuthController notification (including the ones fired by
+  /// refreshProfile). Stream subscriptions are taken EXACTLY once and
+  /// cancelled in [dispose]; the old version stacked a duplicate set of
+  /// listeners on every re-entry → doubled unread counts and repeated
+  /// notifications after each profile edit.
   Future<void> start() async {
+    if (_started) {
+      // Already wired — just refresh the visible state.
+      await load();
+      return;
+    }
+    _started = true;
     await load();
-    services.connectivity.changes.listen((o) {
+    _connectivitySub = services.connectivity.changes.listen((o) {
       online = o;
       notifyListeners();
     });
     _subs = services.realtime.messageEvents.listen(_onMessageEvent);
-    services.realtime.chatEvents.listen((_) => load());
-    services.realtime.receiptEvents.listen((_) async {
+    _chatSub = services.realtime.chatEvents.listen((_) => load());
+    _receiptSub = services.realtime.receiptEvents.listen((_) async {
       unread = await _safeUnread();
       notifyListeners();
     });
@@ -203,6 +219,9 @@ class ChatsController extends ChangeNotifier {
   @override
   void dispose() {
     _subs?.cancel();
+    _connectivitySub?.cancel();
+    _chatSub?.cancel();
+    _receiptSub?.cancel();
     super.dispose();
   }
 }

@@ -485,7 +485,10 @@ class VioletAuthErrors {
     if (error is VioletAuthFailure) {
       final pair = _map[error.code];
       if (pair != null) return idx == 0 ? pair.$1 : pair.$2;
-      return idx == 0 ? error.fallbackAr : error.fallbackAr;
+      // VioletAuthFailure carries an Arabic fallback only — both
+      // surfaces use it (the old code had a ternary with two
+      // identical branches).
+      return error.fallbackAr;
     }
     String code = '';
     if (error is FirebaseAuthException) code = error.code;

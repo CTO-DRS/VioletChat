@@ -119,19 +119,20 @@ void main() {
       expect(ChatController.mergeWindow(loaded, latest), same(latest));
     });
 
-    test('loaded history is preserved behind the latest page', () {
+    test('loaded history stays in front of the latest page (ascending)', () {
       final now = DateTime.now();
-      // Latest page: 30 newest; loaded window additionally holds 10
-      // older messages the user scrolled through.
+      // Latest page: 30 newest (ascending); loaded window additionally
+      // holds 10 older messages the user scrolled through.
       final latest = List.generate(
           30, (i) => msg('n$i', now.subtract(Duration(minutes: i))));
       final older = List.generate(
           10, (i) => msg('o$i', now.subtract(Duration(minutes: 100 + i))));
       final merged = ChatController.mergeWindow([...latest, ...older], latest);
       expect(merged, hasLength(40));
-      // Newest 30 first (same objects), then the preserved history.
-      expect(merged.take(30).map((m) => m.id), latest.map((m) => m.id));
-      expect(merged.skip(30).map((m) => m.id), older.map((m) => m.id));
+      // Ascending display convention: older history first (top),
+      // then the refreshed latest page (bottom = newest).
+      expect(merged.take(10).map((m) => m.id), older.map((m) => m.id));
+      expect(merged.skip(10).map((m) => m.id), latest.map((m) => m.id));
     });
 
     test('overlap ids dedupe — no duplicated rows after refresh', () {

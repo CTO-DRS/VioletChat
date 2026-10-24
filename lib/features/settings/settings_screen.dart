@@ -540,7 +540,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
     try {
       final me = await _services.profiles.getMyProfile();
       final chats = await _services.cache.chats();
-      final messages = await _services.cache.search('');
+      // FIX (audit 2026-10-25): export the FULL cached history per chat —
+      // the old search('') call silently capped the export at 50 rows.
+      final messages = [
+        for (final c in chats) ...await _services.cache.allForChat(c.id),
+      ]..sort((a, b) => a.createdAt.compareTo(b.createdAt));
       final data = {
         'app': AppConfig.appName,
         'exported_at': DateTime.now().toUtc().toIso8601String(),

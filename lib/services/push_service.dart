@@ -17,6 +17,14 @@ class PushService {
 
   static bool _initialized = false;
   static StreamSubscription<String>? _tokenRefreshSub;
+
+  // FIX (audit 2026-10-25): the token-refresh subscription is created
+  // once per process but the OLD code closed over the FIRST userId —
+  // a different user signing in later on this device had refreshed
+  // tokens attributed to the previous account. Both values are now
+  // read at event time.
+  static String? _currentUserId;
+  static dynamic _currentClient;
   static StreamSubscription<RemoteMessage>? _backgroundTapSub;
 
   /// v0.1.0: invoked when the user opens the app from an FCM
@@ -60,8 +68,13 @@ class PushService {
         await _upsertToken(client, token, userId);
       }
 
-      _tokenRefreshSub ??= messaging.onTokenRefresh
-          .listen((t) => _upsertToken(client, t, userId));
+      _currentUserId = userId;
+      _currentClient = client;
+      _tokenRefreshSub ??= messaging.onTokenRefresh.listen((t) {
+        final uid = _currentUserId;
+        final c = _currentClient;
+        if (uid != null && c != null) _upsertToken(c, t, uid);
+      });
 
       // Message received while the app is OPEN: ignore (realtime covers
       // it; duplicates would be double notifications).
@@ -102,6 +115,8 @@ class PushService {
       }
       _tokenRefreshSub?.cancel();
       _tokenRefreshSub = null;
+      _currentUserId = null;
+      _currentClient = null;
     } catch (e) {
       AppLogger.w('push', 'token deregistration failed (continuing)');
     }
