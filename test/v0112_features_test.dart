@@ -259,14 +259,16 @@ void main() {
       expect(segs.single.text, '**ليس غامقاً**');
     });
 
-    test('أولوية الغامق على المائل (***ت*** → غامق «ت» + بقايا حرفية)', () {
+    test('أولوية الغامق على المائل (***ت*** → غامق «*ت» + بقايا حرفية)', () {
+      // سلوك flat موثق: زوج ** الأول يبدأ عند 0 وينتهي عند أول '**'
+      // بعده (الموضع 4) — الداخل «*ت» والنجمة الأخيرة تبقى حرفية.
       const src = '***ت***';
       final segs = parseMessageSegments(src);
       expect(segs.length, 2);
       expect(segs[0].style, 'bold');
-      expect(segs[0].text, 'ت');
+      expect(segs[0].text, '*ت');
       expect(segs[1].style, isNull);
-      expect(segs[1].text, '**');
+      expect(segs[1].text, '*');
     });
 
     test('جملة عربية كاملة مع كل الصيغ — تسلسل دقيق', () {
