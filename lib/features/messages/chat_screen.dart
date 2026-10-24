@@ -30,6 +30,8 @@ import '../../core/utils/view_once.dart';
 import '../../data/models/models.dart';
 import '../../routing/app_router.dart';
 import '../../services/chat_export_service.dart';
+import '../../services/scheduled_messages_service.dart';
+import '../../services/translation_service.dart';
 import '../../state/app_services.dart';
 import '../../state/chat_controller.dart';
 import '../../state/chats_controller.dart';
@@ -93,6 +95,12 @@ class _ChatScreenState extends State<ChatScreen> {
   final Map<String, GlobalKey> _tileKeys = {};
   String? _highlightId;
   Timer? _highlightTimer;
+
+  // v0.1.14 — in-chat translation. The one-time privacy note is shown
+  // on the FIRST translation only (honest disclosure: the selected
+  // message text goes to the public translation endpoint, on demand).
+  static bool _translatePrivacyShown = false;
+  bool _translating = false;
 
   List<ChatMember> _members = [];
   final Map<String, Profile> _memberMap = {};
@@ -970,6 +978,15 @@ class _ChatScreenState extends State<ChatScreen> {
                 Clipboard.setData(ClipboardData(text: m.text ?? ''));
                 _snack('تم نسخ الرسالة');
               }),
+            // v0.1.14 — on-demand translation (second tap hides the
+            // panel: the tile doubles as a toggle).
+            if (hasText)
+              _sheetTile(Icons.translate_rounded,
+                  _c.translations.containsKey(m.id) ? 'إخفاء الترجمة' : 'ترجمة',
+                  () {
+                Navigator.pop(sheetCtx);
+                _translateMessage(m);
+              }),
             if (_canForward(m))
               _sheetTile(Icons.shortcut, 'إعادة توجيه', () {
                 Navigator.pop(sheetCtx);
@@ -1020,6 +1037,34 @@ class _ChatScreenState extends State<ChatScreen> {
         ),
       ),
     );
+  }
+
+  /// v0.1.14 — translate one message on demand. Second invocation on
+  /// the same message hides the panel (toggle). The one-time privacy
+  /// note fires on the very first successful translation.
+  Future<void> _translateMessage(Message m) async {
+    final text = (m.text ?? '').trim();
+    if (text.isEmpty || _translating) return;
+    // Toggle-off path: the panel is already visible — remove it.
+    if (_c.translations.containsKey(m.id)) {
+      _c.clearTranslation(m.id);
+      return;
+    }
+    _translating = true;
+    _snack('جاري الترجمة...');
+    try {
+      final r = await TranslationService.I.translate(text);
+      if (!mounted) return;
+      _c.setTranslation(m.id, r);
+      if (!_translatePrivacyShown) {
+        _translatePrivacyShown = true;
+        _snack('خصوصية: يُرسل نص الرسالة إلى خدمة الترجمة عند الطلب فقط');
+      }
+    } catch (_) {
+      if (mounted) _snack('تعذرت الترجمة — تحقق من اتصالك بالإنترنت');
+    } finally {
+      _translating = false;
+    }
   }
 
   void _confirmDeleteForAll(Message m) {
@@ -1978,6 +2023,9 @@ class _ChatScreenState extends State<ChatScreen> {
                   _fmtMessageSpan(m.text!, mine),
                   textAlign: TextAlign.right,
                 ),
+              // v0.1.14 — on-demand translation panel (in-memory only).
+              if (_c.translations[m.id] != null)
+                _translationPanel(m.id, mine),
             ],
             const SizedBox(height: 3),
             Row(
@@ -2025,6 +2073,57 @@ class _ChatScreenState extends State<ChatScreen> {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  /// v0.1.14 — translucent panel rendered inside the bubble carrying
+  /// the on-demand translation + a dismiss control. On my messages it
+  /// tints over the brand gradient; on theirs it sits on the surface.
+  Widget _translationPanel(String msgId, bool mine) {
+    final t = _c.translations[msgId]!;
+    final cs = Theme.of(context).colorScheme;
+    final fg = mine ? Colors.white : cs.onSurface;
+    final sub = mine ? Colors.white70 : cs.onSurfaceVariant;
+    return Container(
+      margin: const EdgeInsetsDirectional.only(top: 6),
+      padding: const EdgeInsets.fromLTRB(9, 6, 9, 7),
+      decoration: BoxDecoration(
+        color: mine
+            ? Colors.white.withValues(alpha: 0.16)
+            : cs.surfaceContainerHighest.withValues(alpha: 0.6),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.translate_rounded, size: 12, color: sub),
+              const SizedBox(width: 4),
+              Expanded(
+                child: Text(
+                  'مترجم (${t.source} ← ${t.target})',
+                  style: TextStyle(
+                      fontSize: 10,
+                      fontStyle: FontStyle.italic,
+                      color: sub),
+                ),
+              ),
+              GestureDetector(
+                onTap: () => _c.clearTranslation(msgId),
+                child: Icon(Icons.close, size: 14, color: sub),
+              ),
+            ],
+          ),
+          const SizedBox(height: 3),
+          SelectableText(
+            t.text,
+            style: TextStyle(fontSize: 13.5, color: fg, height: 1.3),
+            textAlign: TextAlign.right,
+          ),
+        ],
       ),
     );
   }
@@ -2361,6 +2460,12 @@ class _ChatScreenState extends State<ChatScreen> {
                   ? _replyBar(c.replyTo!)
                   : const SizedBox(width: double.infinity),
             ),
+            // v0.1.14 — scheduled messages strip (rebuilds on queue
+            // changes: add / cancel / auto-fire).
+            ListenableBuilder(
+              listenable: _services.scheduled,
+              builder: (context, _) => _scheduledStrip(),
+            ),
             // v0.1.0: SafeArea(top:false) consumes the gesture-nav /
             // display-cutout bottom inset. The old flat Container sat
             // directly in the Scaffold body, so on devices without a
@@ -2447,6 +2552,7 @@ class _ChatScreenState extends State<ChatScreen> {
     required String tooltip,
     required VoidCallback? onPressed,
     bool filled = false,
+    VoidCallback? onLongPress,
   }) {
     final btn = filled
         ? IconButton.filled(
@@ -2454,6 +2560,7 @@ class _ChatScreenState extends State<ChatScreen> {
             tooltip: tooltip,
             icon: icon,
             onPressed: onPressed,
+            onLongPress: onLongPress,
             padding: EdgeInsets.zero,
             constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
           )
@@ -2462,6 +2569,7 @@ class _ChatScreenState extends State<ChatScreen> {
             tooltip: tooltip,
             icon: icon,
             onPressed: onPressed,
+            onLongPress: onLongPress,
             padding: EdgeInsets.zero,
             constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
           );
@@ -2527,6 +2635,9 @@ class _ChatScreenState extends State<ChatScreen> {
                     icon:
                         const Icon(Icons.mic, color: AppTheme.brandSecondary),
                     onPressed: _startRecording,
+                    // v0.1.14 — discoverability: long-press hints at
+                    // scheduling even with an empty composer.
+                    onLongPress: _scheduleComposerText,
                   )
                 : _composerButton(
                     key: const ValueKey('send'),
@@ -2542,10 +2653,127 @@ class _ChatScreenState extends State<ChatScreen> {
                       child: const Icon(Icons.send, size: 20),
                     ),
                     onPressed: _sendText,
+                    // v0.1.14 — long-press the send arrow to schedule
+                    // the composer text for later (WhatsApp-style).
+                    onLongPress: _scheduleComposerText,
                   ),
           ),
         ),
       ],
+    );
+  }
+
+  /// v0.1.14 — schedule the composer text for later sending. Long-press
+  /// the send/mic button → date + time pickers → the message joins the
+  /// device-local queue (keystore-encrypted); it is sent through the
+  /// normal E2EE path when its time arrives. Reply linkage is captured
+  /// at schedule time.
+  Future<void> _scheduleComposerText() async {
+    final text = _textCtrl.text.trim();
+    if (text.isEmpty) {
+      _snack('اكتب رسالتك أولاً ثم اضغط مطولاً على زر الإرسال لجدولتها');
+      return;
+    }
+    final now = DateTime.now();
+    final date = await showDatePicker(
+      context: context,
+      initialDate: now,
+      firstDate: now,
+      lastDate: now.add(const Duration(days: 60)),
+      helpText: 'تاريخ الإرسال',
+    );
+    if (date == null || !mounted) return;
+    final initialTime =
+        TimeOfDay.fromDateTime(now.add(const Duration(minutes: 30)));
+    final time = await showTimePicker(
+      context: context,
+      initialTime: initialTime,
+      helpText: 'وقت الإرسال',
+    );
+    if (time == null || !mounted) return;
+    final sendAt =
+        DateTime(date.year, date.month, date.day, time.hour, time.minute);
+    if (sendAt.isBefore(now.add(const Duration(minutes: 1)))) {
+      _snack('اختر وقتاً في المستقبل');
+      return;
+    }
+    final reply = _c.replyTo;
+    await _services.scheduled.add(
+      chatId: _c.chat.id,
+      text: text,
+      sendAt: sendAt,
+      replyTo: reply?.id,
+      replyPreview:
+          reply == null ? null : ChatController.replyPreviewOf(reply),
+    );
+    if (reply != null) _c.cancelReply();
+    _textCtrl.clear();
+    if (!mounted) return;
+    FocusManager.instance.primaryFocus?.unfocus();
+    _snack(
+        'أُجدولت للإرسال ${sendAt.day}/${sendAt.month} — ${sendAt.hour}:${sendAt.minute.toString().padLeft(2, '0')} '
+        '(يُرسل تلقائياً في وقته، وإلا عند أول فتح للتطبيق)');
+  }
+
+  /// v0.1.14 — strip of this chat's scheduled messages, shown above
+  /// the composer. Each row shows time + preview with a one-tap cancel.
+  Widget _scheduledStrip() {
+    final list = _services.scheduled.forChat(_c.chat.id);
+    if (list.isEmpty) return const SizedBox.shrink();
+    final cs = Theme.of(context).colorScheme;
+    return Container(
+      width: double.infinity,
+      color: cs.surfaceContainerHighest.withValues(alpha: 0.5),
+      padding: const EdgeInsetsDirectional.only(start: 12, top: 4, bottom: 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          for (final ScheduledMessage s in list.take(3))
+            Padding(
+              padding: const EdgeInsetsDirectional.only(bottom: 2),
+              child: Row(
+                children: [
+                  const Icon(Icons.schedule_rounded,
+                      size: 14, color: AppTheme.brandSecondary),
+                  const SizedBox(width: 6),
+                  Text(
+                    '${s.sendAt.day}/${s.sendAt.month} — '
+                    '${s.sendAt.hour}:${s.sendAt.minute.toString().padLeft(2, '0')}',
+                    style: const TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        color: AppTheme.brandSecondary),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      s.text,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style:
+                          TextStyle(fontSize: 12, color: cs.onSurfaceVariant),
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: 'إلغاء الجدولة',
+                    visualDensity: VisualDensity.compact,
+                    icon: const Icon(Icons.close, size: 16),
+                    onPressed: () async {
+                      await _services.scheduled.cancel(s.id);
+                      if (mounted) _snack('أُلغيت الرسالة المجدولة');
+                    },
+                  ),
+                ],
+              ),
+            ),
+          if (list.length > 3)
+            Text(
+              '+${list.length - 3} رسائل مجدولة أخرى',
+              style: TextStyle(fontSize: 10, color: cs.onSurfaceVariant),
+            ),
+        ],
+      ),
     );
   }
 

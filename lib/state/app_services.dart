@@ -4,6 +4,7 @@ import 'package:device_info_plus/device_info_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../core/logging/app_logger.dart';
+import '../core/storage/key_value_store.dart';
 import '../core/storage/local_database.dart';
 import '../core/storage/message_cache.dart';
 import '../crypto/identity.dart';
@@ -23,6 +24,7 @@ import '../services/notification_service.dart';
 import '../services/presence_service.dart';
 import '../services/push_service.dart';
 import '../services/realtime_service.dart';
+import '../services/scheduled_messages_service.dart';
 import '../services/session_manager.dart';
 import '../services/story_service.dart';
 import '../services/sync_engine.dart';
@@ -60,6 +62,7 @@ class AppServices {
   late final GroupCallService groupCall;
   late final CallTransport callTransport;
   late final PresenceService presence;
+  late final ScheduledMessagesService scheduled;
 
   static bool _booting = false;
 
@@ -114,6 +117,24 @@ class AppServices {
     sync = SyncEngine(auth, messages, chats, crypto, cache, connectivity);
     realtime = RealtimeService(client, sync, sessionMgr, crypto);
 
+    // v0.1.14 — scheduled messages: device-local queue sent through the
+    // normal E2EE path when due. Fully injected wiring (no cycles):
+    // chat lookup rides the local chat cache; sending is enqueue+drain.
+    scheduled = ScheduledMessagesService(SecureKeyValueStore());
+    scheduled.chatResolver = (chatId) async {
+      try {
+        for (final c in await cache.chats()) {
+          if (c.id == chatId) return c;
+        }
+      } catch (_) {}
+      return null;
+    };
+    scheduled.sender = (msg, chat) async {
+      await sync.enqueueText(chat, msg.text,
+          replyTo: msg.replyTo, replyPreview: msg.replyPreview);
+      await sync.drain();
+    };
+
     await connectivity.start();
     AppLogger.i('boot', 'AppServices ready');
   }
@@ -151,6 +172,10 @@ class AppServices {
     await callTransport.start();
     presence.start();
     sync.start();
+    // v0.1.14 — scheduled messages: load queue + flush what came due
+    // while the app was closed, then keep ticking every 15 s.
+    await scheduled.load();
+    scheduled.startTicker();
   }
 
   Future<void> onSignedOut() async {
@@ -159,6 +184,10 @@ class AppServices {
     await callTransport.stop();
     presence.stop();
     sync.stop();
+    // v0.1.14 — messaging keys die with the session: queued scheduled
+    // messages must never outlive the identity that would send them.
+    scheduled.stopTicker();
+    await scheduled.wipe();
     await notifications.cancelAll();
     await LocalDatabase.wipeAll();
     MessageCache.myId = null;

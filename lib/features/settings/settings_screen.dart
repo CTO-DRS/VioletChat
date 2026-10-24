@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 import 'package:share_plus/share_plus.dart';
@@ -11,6 +12,7 @@ import '../../data/models/models.dart';
 import '../../features/admin/admin_panel_screen.dart';
 import '../../routing/app_router.dart';
 import '../../services/device_security_service.dart';
+import '../../services/pin_lock_service.dart';
 import '../../services/update_service.dart';
 import '../../state/app_services.dart';
 import '../../state/auth_controller.dart';
@@ -39,11 +41,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
   /// the app-lock switch stays disabled/“غير متوفر” meanwhile.
   bool? _biometricsAvailable;
 
+  /// v0.1.14 — is a device-local PIN set? (keystore-backed, read once
+  /// here and refreshed after every PIN flow).
+  bool _pinSet = false;
+
   @override
   void initState() {
     super.initState();
     DeviceSecurityService.biometricsAvailable().then((ok) {
       if (mounted) setState(() => _biometricsAvailable = ok);
+    });
+    PinLockService.I.isPinSet().then((set) {
+      if (mounted) setState(() => _pinSet = set);
     });
   }
 
@@ -90,6 +99,168 @@ class _SettingsScreenState extends State<SettingsScreen> {
         .update(_copy(settings, lockGrace: picked));
     setState(() {});
   }
+
+  /// v0.1.14 — the lock can engage when EITHER factor exists.
+  bool get _lockAvailable =>
+      _pinSet || _biometricsAvailable == true;
+
+  // -----------------------------------------------------------------
+  // v0.1.14 — PIN flows (set / change / remove)
+  // -----------------------------------------------------------------
+
+  /// One PIN-entry dialog. Returns the entered digits or null.
+  /// [title] differs per flow; digits-only, obscured, 4–6 chars.
+  Future<String?> _askPinDialog(String title, {String? hint}) {
+    final ctrl = TextEditingController();
+    return showDialog<String>(
+      context: context,
+      builder: (dlgCtx) => AlertDialog(
+        title: Text(title),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (hint != null)
+              Padding(
+                padding: const EdgeInsetsDirectional.only(bottom: 10),
+                child: Text(hint,
+                    style: const TextStyle(fontSize: 12),
+                    textAlign: TextAlign.right),
+              ),
+            TextField(
+              controller: ctrl,
+              autofocus: true,
+              obscureText: true,
+              keyboardType: TextInputType.number,
+              maxLength: 6,
+              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+              decoration: const InputDecoration(
+                hintText: '••••',
+                counterText: '',
+                prefixIcon: Icon(Icons.lock_outline, size: 20),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dlgCtx),
+            child: const Text('إلغاء'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dlgCtx, ctrl.text.trim()),
+            child: const Text('متابعة'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Set-PIN flow: enter twice, validate, store.
+  Future<void> _setPinFlow() async {
+    final first = await _askPinDialog('تعيين رمز PIN',
+        hint: 'اختر رمزاً من 4 إلى 6 أرقام. يُخزَّن مشفراً على هذا الجهاز فقط.');
+    if (first == null || !mounted) return;
+    if (!_validPin(first)) {
+      _snack('الرمز يجب أن يكون من 4 إلى 6 أرقام');
+      return;
+    }
+    final second = await _askPinDialog('تأكيد الرمز');
+    if (second == null || !mounted) return;
+    if (first != second) {
+      _snack('الرمزان غير متطابقين — أعد المحاولة');
+      return;
+    }
+    try {
+      await PinLockService.I.setPin(first);
+      if (!mounted) return;
+      setState(() => _pinSet = true);
+      _snack('تم تعيين رمز القفل — فعّل «قفل التطبيق» أدناه');
+    } catch (_) {
+      _snack('تعذر حفظ الرمز — أعد المحاولة');
+    }
+  }
+
+  /// Manage sheet for an existing PIN: change (verify current first)
+  /// or remove.
+  Future<void> _pinManageSheet() async {
+    showModalBottomSheet<void>(
+      context: context,
+      builder: (sheetCtx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 10),
+            ListTile(
+              leading: const Icon(Icons.edit_rounded,
+                  color: AppTheme.brandSecondary),
+              title: const Text('تغيير الرمز'),
+              onTap: () {
+                Navigator.pop(sheetCtx);
+                _changePinFlow();
+              },
+            ),
+            ListTile(
+              leading: Icon(Icons.delete_outline,
+                  color: Theme.of(context).colorScheme.error),
+              title: const Text('إزالة الرمز'),
+              onTap: () {
+                Navigator.pop(sheetCtx);
+                _removePin();
+              },
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _changePinFlow() async {
+    final current = await _askPinDialog('أدخل الرمز الحالي');
+    if (current == null || !mounted) return;
+    if (!await PinLockService.I.verifyPin(current)) {
+      _snack('الرمز الحالي غير صحيح');
+      return;
+    }
+    final first = await _askPinDialog('الرمز الجديد',
+        hint: 'من 4 إلى 6 أرقام — لا تستخدم رقماً يسهل تخمينه.');
+    if (first == null || !mounted) return;
+    if (!_validPin(first)) {
+      _snack('الرمز يجب أن يكون من 4 إلى 6 أرقام');
+      return;
+    }
+    final second = await _askPinDialog('تأكيد الرمز الجديد');
+    if (second == null || !mounted) return;
+    if (first != second) {
+      _snack('الرمزان غير متطابقين — أعد المحاولة');
+      return;
+    }
+    try {
+      await PinLockService.I.setPin(first);
+      if (!mounted) return;
+      setState(() => _pinSet = true);
+      _snack('تم تغيير رمز القفل');
+    } catch (_) {
+      _snack('تعذر حفظ الرمز — أعد المحاولة');
+    }
+  }
+
+  Future<void> _removePin() async {
+    final current = await _askPinDialog('أدخل الرمز الحالي',
+        hint: 'سيتم إزالة رمز القفل من هذا الجهاز.');
+    if (current == null || !mounted) return;
+    if (!await PinLockService.I.verifyPin(current)) {
+      _snack('الرمز الحالي غير صحيح');
+      return;
+    }
+    await PinLockService.I.clearPin();
+    if (!mounted) return;
+    setState(() => _pinSet = false);
+    _snack('أُزيل رمز القفل');
+  }
+
+  static bool _validPin(String pin) =>
+      pin.length >= 4 && pin.length <= 6 && RegExp(r'^\d+$').hasMatch(pin);
 
   UserSettings _copy(
     UserSettings s, {
@@ -698,19 +869,44 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         .update(_copy(settings, presence: v)),
                   ),
                   const Divider(height: 1),
+                  // v0.1.14 — device-local PIN management.
+                  ListTile(
+                    leading: const Icon(Icons.password_rounded,
+                        color: AppTheme.brandSecondary),
+                    title: Text(_pinSet
+                        ? 'رمز القفل (PIN)'
+                        : 'تعيين رمز PIN للقفل'),
+                    subtitle: Text(
+                      _pinSet
+                          ? 'تغيير الرمز أو إزالته — يُخزَّن مشفراً على هذا الجهاز فقط'
+                          : 'من 4 إلى 6 أرقام — يُخزَّن مشفراً على هذا الجهاز فقط ولا يُزامَن مع الخادم',
+                      style: const TextStyle(fontSize: 11),
+                    ),
+                    trailing: _pinSet
+                        ? const Icon(Icons.chevron_left, size: 20)
+                        : null,
+                    onTap: _pinSet ? _pinManageSheet : _setPinFlow,
+                  ),
+                  const Divider(height: 1),
                   // v0.1.0 device privacy — opt-in, local, fail-safe.
+                  // v0.1.14: PIN now counts as a lock factor alongside
+                  // biometrics.
                   SwitchListTile(
                     secondary: const Icon(Icons.fingerprint_rounded,
                         color: AppTheme.brandSecondary),
-                    title: const Text('قفل التطبيق بالبصمة'),
+                    title: const Text('قفل التطبيق (بصمة أو رمز)'),
                     subtitle: Text(
-                      _biometricsAvailable == true
-                          ? 'طلب البصمة/الوجه عند كل فتح للتطبيق أو عودته من الخلفية'
-                          : 'غير متوفر — لا توجد بصمة/وجه مسجلة على هذا الجهاز',
+                      _lockAvailable
+                          ? (_pinSet && _biometricsAvailable == true
+                              ? 'القفل بالرمز PIN أو البصمة/الوجه عند فتح التطبيق أو عودته من الخلفية'
+                              : _pinSet
+                                  ? 'القفل برمز PIN عند فتح التطبيق أو عودته من الخلفية'
+                                  : 'طلب البصمة/الوجه عند كل فتح للتطبيق أو عودته من الخلفية')
+                          : 'عيّن رمز PIN أعلاه أو سجّل بصمة/وجه على الجهاز للتمكن من التفعيل',
                       style: const TextStyle(fontSize: 11),
                     ),
-                    value: settings.appLock && _biometricsAvailable == true,
-                    onChanged: _biometricsAvailable == true
+                    value: settings.appLock && _lockAvailable,
+                    onChanged: _lockAvailable
                         ? (v) => context
                             .read<SettingsController>()
                             .update(_copy(settings, appLock: v))
@@ -718,7 +914,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                   // v0.1.0: grace window before the lock re-engages
                   // after backgrounding (cold starts always lock).
-                  if (settings.appLock && _biometricsAvailable == true) ...[
+                  if (settings.appLock && _lockAvailable) ...[
                     const Divider(height: 1),
                     ListTile(
                       leading: const Icon(Icons.timer_outlined,

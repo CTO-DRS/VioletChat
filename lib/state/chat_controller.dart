@@ -7,6 +7,7 @@ import '../core/constants/app_constants.dart';
 import '../core/utils/disappearing_policy.dart';
 import '../data/models/models.dart';
 import '../services/media_service.dart';
+import '../services/translation_service.dart';
 import 'app_services.dart';
 
 /// One chat screen state: paginated messages, sending, receipts,
@@ -25,6 +26,21 @@ class ChatController extends ChangeNotifier {
       messages.where((m) => m.kind != AppConstants.kindPollVote).toList();
   Map<String, List<Reaction>> reactionsByMsg = {};
   Map<String, List<Receipt>> receiptsByMsg = {};
+
+  /// v0.1.14 — in-chat translations, keyed by message id. In-memory
+  /// only (never persisted, never synced); shown as a panel inside the
+  /// bubble until the user dismisses it.
+  final Map<String, TranslationResult> translations = {};
+  void setTranslation(String msgId, TranslationResult r) {
+    translations[msgId] = r;
+    notifyListeners();
+  }
+
+  void clearTranslation(String msgId) {
+    translations.remove(msgId);
+    notifyListeners();
+  }
+
   String? typingUserId;
   Timer? _typingTimer;
   bool loadingOlder = false;

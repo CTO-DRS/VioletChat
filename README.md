@@ -40,12 +40,15 @@ Flutter + Firebase Authentication + Cloud Firestore + Supabase (نقل
 | وسائط الرؤية الواحدة (صور/فيديو/صوت — العلم داخل التشفير، محو الكاش بعد المشاهدة، حظر التوجيه، خارج المعرض) | IMPLEMENTED (v0.1.13) — NOT VERIFIED ميدانياً |
 | البحث داخل المحادثة (قفز للنتائج + تطبيع عربي متسامح — محلي صرف فوق الكاش المفكوك) | IMPLEMENTED (v0.1.13) — NOT VERIFIED ميدانياً |
 | سرعات تشغيل الرسائل الصوتية (1×/1.5×/2×) | IMPLEMENTED (v0.1.13) — NOT VERIFIED ميدانياً |
+| الترجمة داخل المحادثة (عند الطلب حصراً + إفصاح إرسال لخدمة الترجمة) | IMPLEMENTED (v0.1.14) — NOT VERIFIED ميدانياً |
+| رسائل مجدولة محلية (طابور Keystore-مشفر + إرسال E2EE في وقته) | IMPLEMENTED (v0.1.14) — NOT VERIFIED ميدانياً |
+| قفل التطبيق برمز PIN محلي (هاش مملح في Keystore + بديل/مساند للبصمة) | IMPLEMENTED (v0.1.14) — NOT VERIFIED ميدانياً |
 | مكالمات WebRTC ثنائية + جماعية (mesh ≤ 8) | IMPLEMENTED — NOT VERIFIED ميدانياً |
 | أوفلاين + مزامنة | IMPLEMENTED — NOT VERIFIED ميدانياً |
 | Realtime + مؤشر الكتابة + حضور «متصل الآن» | IMPLEMENTED — NOT VERIFIED ميدانياً |
 | إشعارات محلية | IMPLEMENTED |
 | إشعارات نظام عند التطبيق مغلق | عميل FCM مدمج — الإرسال من الخادم يتطلب مفتاح المالك |
-| قفل حيوي اختياري (بصمة/وجه) | IMPLEMENTED |
+| قفل حيوي اختياري (بصمة/وجه أو رمز PIN — عاملان بفشل-آمن) | IMPLEMENTED |
 | بناء APK + اختبارات | آلي عبر GitHub Actions (workflow في هذا المستودع) |
 
 لا واجهات وهمية: ما لم يُنفذ كاملاً موثق بحالته الحقيقية.
