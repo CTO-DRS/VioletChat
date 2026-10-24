@@ -151,7 +151,10 @@ void main() {
       expect(messageMatchesQuery(m, 'احمد'), isTrue);
       expect(messageMatchesQuery(m, 'أحمد'), isTrue);
       expect(messageMatchesQuery(m, 'السلام'), isTrue);
-      expect(messageMatchesQuery(m, 'اسلآم'), isTrue);
+      expect(messageMatchesQuery(m, 'عليكم'), isTrue);
+      // المطابقة حرفية بعد التطبيع: «السلام» لا تحتوي «اسلام»
+      // (اللام تتقدم على السين) — سلوك موثق لا يُخفى.
+      expect(messageMatchesQuery(m, 'اسلام'), isFalse);
       expect(messageMatchesQuery(m, 'مساء'), isFalse);
     });
 
