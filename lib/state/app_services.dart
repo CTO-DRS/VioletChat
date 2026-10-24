@@ -8,6 +8,7 @@ import '../core/storage/key_value_store.dart';
 import '../core/storage/local_database.dart';
 import '../core/storage/message_cache.dart';
 import '../crypto/identity.dart';
+import '../crypto/primitives.dart';
 import '../data/repositories/call_repository.dart';
 import '../data/repositories/chat_repository.dart';
 import '../data/repositories/key_repository.dart';
@@ -105,6 +106,27 @@ class AppServices {
     mediaService = MediaService(mediaRepo, crypto);
     stories = StoryService(client, keys, mediaRepo, identity);
     callTransport = CallTransport(client);
+    // Authenticated call signaling (fix: audit 2026-10-25) — every
+    // outgoing signal is signed with this device's Ed25519 key and
+    // every incoming one is verified against the signing keys the
+    // peer's devices publish in `devices` (public to authenticated
+    // clients). Unauthenticated signals are dropped inside the
+    // transport — see CallTransport docs.
+    callTransport.signer = (msg) => Primitives.sign(identity.sk, msg);
+    callTransport.signingKeyProvider = () => Primitives.ed25519Pub(identity.sk);
+    callTransport.verifier =
+        (spkB64, msg, sigB64) => Primitives.verify(spkB64, msg, sigB64);
+    callTransport.peerSigningKeys = (userId) async {
+      try {
+        final rows = await client
+            .from('devices')
+            .select('signing_key')
+            .eq('user_id', userId);
+        return rows.map((r) => (r as Map)['signing_key'] as String).toList();
+      } catch (_) {
+        return null;
+      }
+    };
     call = CallService(client, notifications, callTransport);
     groupCall = GroupCallService(client, notifications, callTransport);
     // One personal signaling channel feeds both call services; each
@@ -190,6 +212,12 @@ class AppServices {
     await scheduled.wipe();
     await notifications.cancelAll();
     await LocalDatabase.wipeAll();
+    // FIX (audit 2026-10-25): decrypted media files (images/videos/
+    // audio written to the temp media cache) are wiped on sign-out —
+    // the old path left them behind despite the documented claim.
+    try {
+      await mediaService.clearCache();
+    } catch (_) {}
     MessageCache.myId = null;
   }
 
