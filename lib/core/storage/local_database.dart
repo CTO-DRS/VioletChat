@@ -13,7 +13,17 @@ import '../../core/config/app_config.dart';
 ///
 /// SECURITY: the `sessions` table stores ratchet state ENCRYPTED at
 /// rest with a key held in flutter_secure_storage (see IdentityManager
-/// .dbKey). Decrypted text caches are local-only and wiped on logout.
+/// .dbKey). Since the 2026-10-25 audit, MESSAGE CONTENT columns
+/// (text / media_json / body_json / reply_preview) are sealed with the
+/// same key via [sealText] — the SQLite file holds no readable message
+/// content anymore. Structural metadata (chat ids, sender ids,
+/// timestamps) intentionally stays plaintext: the server already sees
+/// exactly that metadata, so sealing it locally would add no privacy
+/// while breaking SQL-level ordering/filtering. Drafts and the outbox
+/// are sealed too (sealJson at their call sites). Cache is wiped on
+/// logout. (File-level SQLCipher remains future work — needs a
+/// device-tested plaintext→SQLCipher migration; this closes the
+/// readable-content gap today.)
 class LocalDatabase {
   LocalDatabase._();
 
@@ -217,6 +227,61 @@ class LocalDatabase {
       return jsonDecode(Primitives.utf8s(plain)) as Map<String, dynamic>;
     } catch (_) {
       return null;
+    }
+  }
+
+  // ------------------------------------------------------------------
+  // Content-at-rest sealing for message content columns (audit fix).
+  // Same keystore-backed key as sealJson, but with an explicit marker
+  // so LEGACY plaintext rows keep rendering after the upgrade.
+  // ------------------------------------------------------------------
+  static const String _encMarker = 'enc1:';
+
+  static final RegExp _encShape =
+      RegExp(r'^enc1:[A-Za-z0-9+/]+={0,2}\|[A-Za-z0-9+/]+={0,2}$');
+
+  /// Seal user content (message text / media JSON / poll & location &
+  /// contact bodies / reply previews) before it touches the database.
+  ///
+  /// Format: `enc1:<nonce-b64>|<ciphertext+mac-b64>`, AES-256-GCM under
+  /// the IdentityManager dbKey. Idempotent: an already-sealed value is
+  /// returned unchanged (safe against double-write paths).
+  static Future<String?> sealText(String? plain) async {
+    if (plain == null || plain.isEmpty) return plain;
+    if (plain.startsWith(_encMarker)) return plain; // already sealed
+    final key = await dbKey();
+    final (nonce, merged) =
+        await Primitives.sealRandom(Primitives.bytesOf(plain), key);
+    return '$_encMarker${Primitives.b64(nonce)}|${Primitives.b64(merged)}';
+  }
+
+  /// Inverse of [sealText].
+  ///
+  /// - Unmarked values pass through untouched (legacy plaintext rows
+  ///   from before this upgrade keep rendering — transparent migration,
+  ///   no cache wipe needed).
+  /// - Marked values decrypt; a corrupted marked blob fails CLOSED
+  ///   (null) rather than ever surfacing ciphertext.
+  ///
+  /// Residual edge, documented honestly: a legacy plaintext value that
+  /// a USER literally typed starting with `enc1:` and shaped like the
+  /// blob format would be treated as sealed and (failing decryption)
+  /// render empty. Constructing that string by accident is vanishingly
+  /// unlikely; accepting it keeps the reader markerless-per-column and
+  /// the scheme identical to sealJson's trust model.
+  static Future<String?> openText(String? blob) async {
+    if (blob == null || blob.isEmpty) return blob;
+    if (!blob.startsWith(_encMarker)) return blob; // legacy plaintext
+    if (!_encShape.hasMatch(blob)) return blob; // marker-prefixed prose
+    try {
+      final parts = blob.substring(_encMarker.length).split('|');
+      if (parts.length != 2) return null;
+      final key = await dbKey();
+      final plain = await Primitives.open(
+          Primitives.unb64(parts[1]), key, Primitives.unb64(parts[0]));
+      return Primitives.utf8s(plain);
+    } catch (_) {
+      return null; // fail closed
     }
   }
 

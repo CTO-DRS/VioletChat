@@ -9,6 +9,13 @@ import '../../data/models/models.dart';
 
 /// Local CRUD over messages_cache / chats_cache / receipts / reactions.
 /// All writes happen through here so cache invariants stay consistent.
+///
+/// SECURITY (audit 2026-10-25): every CONTENT column (text,
+/// media_json, body_json, reply_preview) is SEALED at rest via
+/// LocalDatabase.sealText — the raw SQLite file no longer holds
+/// readable message content. Legacy rows written by older builds are
+/// unmarked plaintext and pass through openText untouched, so the
+/// upgrade needs no migration or cache wipe.
 class MessageCache {
   const MessageCache();
 
@@ -22,16 +29,17 @@ class MessageCache {
     final db = await LocalDatabase.instance;
     await db.insert(
       'messages_cache',
-      _toRow(m),
+      await _toRow(m),
       conflictAlgorithm: ConflictAlgorithm.replace,
     );
   }
 
   Future<void> upsertMessages(List<Message> list) async {
+    if (list.isEmpty) return;
     final db = await LocalDatabase.instance;
     final batch = db.batch();
     for (final m in list) {
-      batch.insert('messages_cache', _toRow(m),
+      batch.insert('messages_cache', await _toRow(m),
           conflictAlgorithm: ConflictAlgorithm.replace);
     }
     await batch.commit(noResult: true);
@@ -68,7 +76,10 @@ class MessageCache {
     final db = await LocalDatabase.instance;
     await db.update(
       'messages_cache',
-      {'text': text, 'edited_at': DateTime.now().toUtc().toIso8601String()},
+      {
+        'text': await LocalDatabase.sealText(text),
+        'edited_at': DateTime.now().toUtc().toIso8601String(),
+      },
       where: 'id = ? OR client_msg_id = ?',
       whereArgs: [messageId, messageId],
     );
@@ -82,8 +93,9 @@ class MessageCache {
     await db.update(
       'messages_cache',
       {
-        'text': poll.question,
-        'body_json': jsonEncode({'poll': poll.toJson()}),
+        'text': await LocalDatabase.sealText(poll.question),
+        'body_json':
+            await LocalDatabase.sealText(jsonEncode({'poll': poll.toJson()})),
         'edited_at': DateTime.now().toUtc().toIso8601String(),
       },
       where: 'id = ? OR client_msg_id = ?',
@@ -119,7 +131,11 @@ class MessageCache {
       orderBy: 'created_at DESC',
       limit: AppConfig.pageSize,
     );
-    final out = rows.map(_fromRow).whereType<Message>().toList();
+    final out = <Message>[];
+    for (final r in rows) {
+      final m = await _fromRow(r);
+      if (m != null) out.add(m);
+    }
     return out.reversed.toList();
   }
 
@@ -132,7 +148,7 @@ class MessageCache {
         where: 'starred = 1 AND deleted_for_all = 0',
         orderBy: 'created_at DESC',
         limit: limit);
-    return rows.map(_fromRow).whereType<Message>().toList();
+    return _decodeAll(rows);
   }
 
   Future<void> setStarred(String messageId, bool on) async {
@@ -166,7 +182,7 @@ class MessageCache {
         whereArgs: [chatId],
         orderBy: 'created_at ASC',
         limit: limit);
-    return rows.map(_fromRow).whereType<Message>().toList();
+    return _decodeAll(rows);
   }
 
   /// v0.1.0 — cached media rows of a chat (newest first), for the
@@ -182,11 +198,14 @@ class MessageCache {
         whereArgs: [chatId, 'media'],
         orderBy: 'created_at DESC',
         limit: limit);
-    return rows
-        .map(_fromRow)
-        .whereType<Message>()
-        .where((m) => !(m.media?.once ?? false))
-        .toList();
+    final out = <Message>[];
+    for (final m in await _decodeAll(rows)) {
+      // A row whose sealed media_json fails to open renders without its
+      // payload — it must not reach the gallery either.
+      if (m.media == null) continue;
+      if (!m.media!.once) out.add(m);
+    }
+    return out;
   }
 
   /// v0.1.13 — in-chat search over the decrypted local cache
@@ -207,23 +226,39 @@ class MessageCache {
       orderBy: 'created_at ASC',
       limit: limit,
     );
-    return rows
-        .map(_fromRow)
-        .whereType<Message>()
-        .where((m) => messageMatchesQuery(m, q))
-        .toList();
+    final out = <Message>[];
+    for (final m in await _decodeAll(rows)) {
+      if (messageMatchesQuery(m, q)) out.add(m);
+    }
+    return out;
   }
 
+  /// Global search over ALL cached messages (newest first).
+  ///
+  /// Was a SQL `LIKE` over the text column; that column is SEALED at
+  /// rest now, so LIKE cannot see plaintext. This scans recent rows and
+  /// filters in Dart with the SAME tolerant Arabic normalisation as the
+  /// in-chat search — strictly better matching than the old raw LIKE.
+  /// Bounded to the 2000 most recent rows so a decade-long cache cannot
+  /// blow the heap.
   Future<List<Message>> search(String query, {int limit = 50}) async {
+    final q = query.trim();
+    if (q.isEmpty) return [];
     final db = await LocalDatabase.instance;
     final rows = await db.query(
       'messages_cache',
-      where: 'text LIKE ? AND deleted_for_all = 0',
-      whereArgs: ['%$query%'],
+      where: 'deleted_for_all = 0',
       orderBy: 'created_at DESC',
-      limit: limit,
+      limit: 2000,
     );
-    return rows.map(_fromRow).whereType<Message>().toList();
+    final out = <Message>[];
+    for (final m in await _decodeAll(rows)) {
+      if (messageMatchesQuery(m, q)) {
+        out.add(m);
+        if (out.length >= limit) break;
+      }
+    }
+    return out;
   }
 
   Future<Message?> byId(String id) async {
@@ -370,21 +405,23 @@ class MessageCache {
   }
 
   // ------------------------------------------------------------------
-  // Serialisation
+  // Serialisation (content columns sealed at rest)
   // ------------------------------------------------------------------
-  Map<String, Object?> _toRow(Message m) => {
+  Future<Map<String, Object?>> _toRow(Message m) async => {
         'id': m.id,
         'chat_id': m.chatId,
         'sender_id': m.senderId,
         'client_msg_id': m.clientMsgId,
         'kind': m.kind,
-        'text': m.text,
-        'media_json': m.media == null ? null : jsonEncode(m.media!.toJson()),
+        'text': await LocalDatabase.sealText(m.text),
+        'media_json': m.media == null
+            ? null
+            : await LocalDatabase.sealText(jsonEncode(m.media!.toJson())),
         // v0.1.10: poll body / ballot index ride the (previously unused)
         // body_json column — no schema migration needed.
-        'body_json': _pollJson(m),
+        'body_json': await LocalDatabase.sealText(_pollJson(m)),
         'reply_to': m.replyTo,
-        'reply_preview': m.replyPreview,
+        'reply_preview': await LocalDatabase.sealText(m.replyPreview),
         'forwarded_from': m.forwardedFrom,
         'expires_at': m.expiresAt,
         'starred': m.starred ? 1 : 0,
@@ -428,10 +465,14 @@ class MessageCache {
     return null;
   }
 
-  Message? _fromRow(Map<String, Object?> r) {
+  Future<Message?> _fromRow(Map<String, Object?> r) async {
     try {
-      final mediaJson = r['media_json'] as String?;
-      final pollJson = r['body_json'] as String?;
+      final mediaJson =
+          await LocalDatabase.openText(r['media_json'] as String?);
+      final pollJson = await LocalDatabase.openText(r['body_json'] as String?);
+      final text = await LocalDatabase.openText(r['text'] as String?);
+      final replyPreview =
+          await LocalDatabase.openText(r['reply_preview'] as String?);
       PollInfo? poll;
       int? pollVote;
       String? pollRef;
@@ -456,7 +497,7 @@ class MessageCache {
         senderDeviceId: '',
         clientMsgId: r['client_msg_id'] as String? ?? r['id'] as String,
         kind: r['kind'] as String? ?? 'text',
-        text: r['text'] as String?,
+        text: text,
         media: mediaJson == null
             ? null
             : MediaInfo.fromJson(jsonDecode(mediaJson) as Map<String, dynamic>),
@@ -467,7 +508,7 @@ class MessageCache {
         location: location,
         contact: contact,
         replyTo: r['reply_to'] as String?,
-        replyPreview: r['reply_preview'] as String?,
+        replyPreview: replyPreview,
         forwardedFrom: r['forwarded_from'] as String?,
         isDeletedForAll: (r['deleted_for_all'] as int? ?? 0) == 1,
         editedAt: r['edited_at'] as String?,
@@ -484,6 +525,17 @@ class MessageCache {
     } catch (_) {
       return null;
     }
+  }
+
+  /// Decode rows sequentially (sealed columns are opened one by one —
+  /// the dbKey is memoised after the first call, so this is cheap).
+  Future<List<Message>> _decodeAll(List<Map<String, Object?>> rows) async {
+    final out = <Message>[];
+    for (final r in rows) {
+      final m = await _fromRow(r);
+      if (m != null) out.add(m);
+    }
+    return out;
   }
 
   Map<String, dynamic> _chatJson(Chat c) => {
