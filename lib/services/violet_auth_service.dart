@@ -128,7 +128,11 @@ class VioletAuthService {
   /// التدفق القياسي: منتقي حسابات Google → رموز ID/Access →
   /// بيانات اعتماد Firebase → جلسة Firebase كاملة.
   ///
-  /// - إلغاء المستخدم يرمي [VioletGoogleCanceled] (لا خطأ — صمت UI).
+  /// - الإلغاء الصريح (كلمة canceled في الاستثناء، أو إغلاق المنتقي
+  ///   بعودة null) يرمي [VioletGoogleCanceled] (لا خطأ — صمت UI).
+  /// - رمز 12501 **بلا كلمة إلغاء** رمز غامض يخفي غالباً مشكلة إعداد
+  ///   — يظهر برسالة تشخيصية بدل الصمت منذ v0.1.15 (انظر
+  ///   [googlePlatformVerdict]).
   /// - فشل التهيئة (DEVELOPER_ERROR وغيره) يصل كـFirebaseAuthException
   /// أو PlatformException ويُترجم عبر [VioletAuthErrors].
   Future<User> signInWithGoogle() async {
@@ -139,8 +143,10 @@ class VioletAuthService {
     try {
       googleUser = await _google.signIn();
     } on Exception catch (e) {
-      // بعض الأجهزة تعيد الإلغاء كاستثناء منصّي وليس null.
-      if (_isCancelError(e)) throw const VioletGoogleCanceled();
+      // بعض الأجهزة تعيد الإلغاء كاستثناء منصّي وليس null — والتصنيف
+      // يفصل الإلغاء الصريح (صمت) عن 12501 الغامض (رسالة تشخيصية).
+      final verdict = googlePlatformVerdict(e);
+      if (verdict != null) throw verdict;
       rethrow;
     }
     if (googleUser == null) throw const VioletGoogleCanceled();
@@ -149,7 +155,8 @@ class VioletAuthService {
     try {
       auth = await googleUser.authentication;
     } on Exception catch (e) {
-      if (_isCancelError(e)) throw const VioletGoogleCanceled();
+      final verdict = googlePlatformVerdict(e);
+      if (verdict != null) throw verdict;
       rethrow;
     }
 
@@ -184,12 +191,34 @@ class VioletAuthService {
     }
   }
 
-  static bool _isCancelError(Object e) {
+  /// v0.1.15 — تصنيف استثناء منصّي قادم من قابس Google Sign-In.
+  ///
+  /// لماذا هذا الفصل؟ درس v0.1.5 (الرسالة العامة تضلّل) ينسحب على
+  /// الصمت أيضاً: بعض الأجهزة تعيد الإلغاء كاستثناء وليس null، لكن
+  /// رمز 12501 يصل أحياناً **بلا كلمة إلغاء** وهو حينها غالباً مشكلة
+  /// إعداد (حساب الجهاز/المزوّد/الموافقة) وليس مستخدماً أغلق النافذة.
+  /// إخفاؤه صامتاً عطّل التشخيص الميداني تماماً (حادثة 2026-10-25:
+  /// ضغطة زر بلا منتقي حسابات وبلا أي رسالة).
+  ///
+  /// - كلمة إلغاء صريحة (canceled/cancelled/sign_in_canceled) →
+  ///   [VioletGoogleCanceled] — صمت UI مقصود (إغلاق حقيقي للنافذة).
+  /// - 12501 بلا كلمة إلغاء → [VioletAuthFailure] بكود
+  ///   'google-12501' — رسالة تشخيصية مرئية تميّز الإغلاق اليدوي من
+  ///   خلل الإعداد.
+  /// - غير ذلك → null (يُعاد رمي الاستثناء ليصنّفه VioletAuthErrors).
+  ///
+  /// منطق نقي بلا منصّة — عام للاختبار وفق نمط VioletBridgeClassifier.
+  static Object? googlePlatformVerdict(Object e) {
     final s = e.toString().toLowerCase();
-    return s.contains('12501') ||
-        s.contains('canceled') ||
+    if (s.contains('canceled') ||
         s.contains('cancelled') ||
-        s.contains('sign_in_canceled');
+        s.contains('sign_in_canceled')) {
+      return const VioletGoogleCanceled();
+    }
+    if (s.contains('12501')) {
+      return const VioletAuthFailure('google-12501', '');
+    }
+    return null;
   }
 
   /// استعادة كلمة المرور — Firebase يرسل البريد بلغته المضبوطة في
@@ -364,6 +393,22 @@ class VioletValidators {
 class VioletAuthErrors {
   VioletAuthErrors._();
 
+  /// v0.1.15 — رسالة 12501 المشتركة: الإغلاق اليدوي للنافذة يُتجاهل،
+  /// وغير ذلك يشخّص (حساب الجهاز/المزوّد/الموافقة). تخدم الكودين
+  /// 'google-12501' (من googlePlatformVerdict) و'12501' (مسار
+  /// استخراج رقم ApiException المغلّف).
+  static const (String, String) _g12501 = (
+    'أُلغي تسجيل الدخول عبر Google (رمز 12501) — إن أغلقت نافذة اختيار '
+        'الحساب بنفسك فتجاهل هذه الرسالة. وإن ظهرت دون إغلاقك لها: تأكد '
+        'من وجود حساب Google على الجهاز ومن تفعيل مزوّد Google في '
+        'Firebase Console ثم أعد المحاولة',
+    'Google sign-in was canceled (code 12501) — if you closed the '
+        'account picker yourself, ignore this message. If it appeared '
+        'without you closing it: make sure a Google account exists on '
+        'the device and the Google provider is enabled in Firebase '
+        'Console, then try again',
+  );
+
   static const Map<String, (String, String)> _map = {
     'email-already-in-use': (
       'هذا البريد مسجّل مسبقاً — جرّب تسجيل الدخول',
@@ -442,6 +487,9 @@ class VioletAuthErrors {
       'خطأ داخلي في خدمات Google — أعد المحاولة بعد قليل',
       'Internal Google services error — try again shortly',
     ),
+    // --- v0.1.15: 12501 بلا كلمة إلغاء — مرئي بدل الصمت ---
+    'google-12501': _g12501,
+    '12501': _g12501,
     '12500': (
       'تعذر إكمال الدخول عبر Google — أعد المحاولة',
       'Google sign-in could not complete — try again',

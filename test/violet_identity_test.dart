@@ -362,6 +362,46 @@ void main() {
     });
   });
 
+  group('googlePlatformVerdict — إلغاء صامت مقابل 12501 المرئي (v0.1.15)', () {
+    // الخلفية: 12501 كان يُخفى صامتاً كإلغاء — وهو أحياناً مشكلة إعداد
+    // حقيقية، والصمت عطّل التشخيص الميداني تماماً (حادثة 2026-10-25:
+    // ضغطة زر بلا منتقي حسابات وبلا أي رسالة).
+    test('إلغاء صريح بكلمة canceled → VioletGoogleCanceled (صمت UI)', () {
+      final verdict = VioletAuthService.googlePlatformVerdict(
+          Exception('PlatformException(sign_in_canceled, whatever)'));
+      expect(verdict, isA<VioletGoogleCanceled>());
+    });
+
+    test('12501 بلا كلمة إلغاء → رسالة تشخيصية مرئية لا صمت', () {
+      final verdict = VioletAuthService.googlePlatformVerdict(Exception(
+          'PlatformException(sign_in_failed, '
+          'com.google.android.gms.common.ApiException: 12501: )'));
+      expect(verdict, isA<VioletAuthFailure>());
+      final f = verdict! as VioletAuthFailure;
+      expect(f.code, 'google-12501');
+      final ar = VioletAuthErrors.messageAr(f);
+      expect(ar, contains('12501'));
+      expect(ar, contains('أغلقت'), reason: 'تمييز الإغلاق اليدوي صراحة');
+      expect(ar, contains('Firebase Console'),
+          reason: 'الإجراء المطلوب يُسمّى في الرسالة');
+      expect(VioletAuthErrors.messageEn(f), contains('12501'));
+    });
+
+    test('إلغاء بكلمة canceled تحمل رقماً يبقى صامتاً (الأولوية للكلمة)', () {
+      final verdict = VioletAuthService.googlePlatformVerdict(Exception(
+          'PlatformException(sign_in_failed, '
+          'ApiException: 12501: SIGN_IN_CANCELED)'.toLowerCase()));
+      expect(verdict, isA<VioletGoogleCanceled>());
+    });
+
+    test('استثناء غير مصنّف يعاد كما هو (null)', () {
+      expect(
+        VioletAuthService.googlePlatformVerdict(Exception('boom-42')),
+        isNull,
+      );
+    });
+  });
+
   group('VioletAuthErrors — تشخيص صادق (v0.1.3)', () {
     test('الفشل المجهول يحمل رمز الخطأ الفعلي في الرسالة', () {
       final msg = VioletAuthErrors.messageAr(Exception('weird-crash-99'));
