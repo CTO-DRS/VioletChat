@@ -10,6 +10,14 @@ import 'dart:io';
 /// the result is cached in memory only (never persisted, never sent to
 /// our server). Nothing is translated automatically — silence by
 /// default, exactly like the big messengers' on-demand flows.
+///
+/// audit 2026-10-25: the text now travels in the POST body
+/// (application/x-www-form-urlencoded) instead of the URL query. URLs
+/// leak — proxies, server access logs, browser-like histories — while
+/// request bodies are not logged that way. Same public `gtx` endpoint,
+/// identical response payload. A hard length cap keeps the request a
+/// translation request (not a data exfiltration channel): the UI calls
+/// this on single chat messages only, the cap is defence in depth.
 class TranslationService {
   TranslationService(this._client);
 
@@ -25,6 +33,11 @@ class TranslationService {
   static const _endpoint = 'https://translate.googleapis.com/translate_a/single';
   static const _timeout = Duration(seconds: 8);
   static const _cacheCap = 200;
+
+  /// Hard cap on translatable text (UTF-16 code units). One chat
+  /// message is far below this; anything larger is rejected BEFORE any
+  /// network I/O happens.
+  static const maxChars = 5000;
 
   /// Smart target: Arabic text → English, everything else → Arabic
   /// (the app is Arabic-first). Heuristic on Arabic-letter ratio so a
@@ -59,14 +72,16 @@ class TranslationService {
     return TranslationResult(text: text, source: source, target: target);
   }
 
-  /// Translate [text]. Throws on network/parse failure; the UI maps
-  /// that to «تعذرت الترجمة». Results are memoised per (target, text).
-  Future<TranslationResult> translate(String text) async {
-    final target = pickTarget(text);
-    final key = '$target\u0000$text';
-    final hit = _cache[key];
-    if (hit != null) return hit;
-
+  /// Build the POST request for [text] → [target]. PURE so tests can
+  /// assert the message text never lands in the URL.
+  ///
+  /// Returns (uri, urlencodedBody). The query carries only parameters;
+  /// the text itself rides the `q=` form field in the body.
+  static (Uri, String) buildRequest(String text, String target) {
+    if (text.length > maxChars) {
+      throw ArgumentError(
+          'translation input too long (${text.length} > $maxChars)');
+    }
     final uri = Uri.parse(_endpoint).replace(queryParameters: {
       'client': 'gtx',
       'sl': 'auto',
@@ -74,11 +89,27 @@ class TranslationService {
       'dt': 't',
       'ie': 'UTF-8',
       'oe': 'UTF-8',
-      'q': text,
     });
-    final req = await _client.getUrl(uri);
+    final body = 'q=${Uri.encodeQueryComponent(text)}';
+    return (uri, body);
+  }
+
+  /// Translate [text]. Throws on network/parse failure (and on text
+  /// above [maxChars]); the UI maps that to «تعذرت الترجمة». Results
+  /// are memoised per (target, text).
+  Future<TranslationResult> translate(String text) async {
+    final target = pickTarget(text);
+    final key = '$target\u0000$text';
+    final hit = _cache[key];
+    if (hit != null) return hit;
+
+    final (uri, reqBody) = buildRequest(text, target);
+    final req = await _client.postUrl(uri);
+    req.headers.set(HttpHeaders.contentTypeHeader,
+        'application/x-www-form-urlencoded; charset=utf-8');
     req.headers.set(HttpHeaders.acceptHeader, 'application/json');
     req.headers.set(HttpHeaders.userAgentHeader, 'Mozilla/5.0 (Android)');
+    req.write(reqBody);
     final res = await req.close().timeout(_timeout);
     if (res.statusCode != 200) {
       await res.drain<void>();
