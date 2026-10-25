@@ -8,6 +8,7 @@ import 'app.dart';
 import 'core/config/app_config.dart';
 import 'core/logging/app_logger.dart';
 import 'core/storage/local_database.dart';
+import 'core/storage/session_vault.dart';
 import 'crypto/identity.dart';
 import 'state/app_services.dart';
 import 'state/auth_controller.dart';
@@ -65,11 +66,21 @@ class _VioletBootstrapState extends State<VioletBootstrap> {
       await VioletAuthController.initFirebase();
 
       // 1) Backend (public URL + publishable key only).
+      //    audit 2026-10-25: the messaging session now persists in the
+      //    Keystore-backed vault instead of plaintext SharedPreferences;
+      //    the vault migrates any pre-existing plaintext copy on first
+      //    boot (same storage key, zero user-visible effect).
       _setStep('تهيئة الاتصال بالخادم…');
       if (!_supabaseReady) {
         await Supabase.initialize(
           url: AppConfig.supabaseUrl,
           publishableKey: AppConfig.supabasePublishableKey,
+          authOptions: FlutterAuthClientOptions(
+            localStorage: SecureVaultLocalStorage(
+              persistSessionKey: SecureVaultLocalStorage.keyFor(
+                  AppConfig.supabaseUrl),
+            ),
+          ),
         );
         _supabaseReady = true;
       }
