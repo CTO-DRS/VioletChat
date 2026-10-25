@@ -192,14 +192,19 @@ class _SecurityScreenState extends State<SecurityScreen> {
               children: [
                 Icon(Icons.fingerprint, color: AppTheme.brandSecondary),
                 SizedBox(width: 10),
-                Text('رقم الأمان',
-                    style: TextStyle(fontWeight: FontWeight.w800)),
+                Expanded(
+                  child: Text('بصمة هوية هذا الجهاز',
+                      style: TextStyle(fontWeight: FontWeight.w800)),
+                ),
               ],
             ),
             const SizedBox(height: 8),
             const Text(
-              'قارن هذا الرقم وجهاً لوجه مع الطرف الآخر للتأكد من عدم وجود '
-              'أي اعتراض على الاتصال. تطابق الرقمين = لا أحد يستمع.',
+              'هذه بصمة هوية التشفير لهذا الجهاز وحده (تتغير عند إعادة '
+              'تسجيل الجهاز). للتحقق من محادثة معينة استخدم رقم الأمان '
+              'الحقيقي من قائمة خيارات كل محادثة ثنائية («رقم الأمان») — '
+              'فهو يُشتق من هوية الطرفين معاً، وهو ما يجعل المقارنة بين '
+              'الطرفين ذات معنى.',
               style: TextStyle(fontSize: 12, height: 1.6),
               textAlign: TextAlign.right,
             ),

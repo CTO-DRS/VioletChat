@@ -172,6 +172,24 @@ class ChatRepository {
     return dev.first['identity_key'] as String?;
   }
 
+  /// Per-device identity keys of a peer (audit 2026-10-25 — drives the
+  /// per-chat safety number sheet). The `devices` table is readable
+  /// cross-user by design: prekey bundles live there and X3DH needs
+  /// them. Returns (deviceId, identityKey) pairs for non-revoked
+  /// devices, oldest first.
+  Future<List<(String, String)>> peerIdentityKeys(String userId) async {
+    final rows = await client
+        .from('devices')
+        .select('device_id, identity_key')
+        .eq('user_id', userId)
+        .filter('revoked_at', 'is', null)
+        .order('created_at', ascending: true);
+    return [
+      for (final r in (rows as List))
+        (r['device_id'] as String, r['identity_key'] as String),
+    ];
+  }
+
   // ------------------------------------------------------------------
   // Invite links + join requests
   // ------------------------------------------------------------------

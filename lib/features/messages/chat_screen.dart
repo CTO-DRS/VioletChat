@@ -39,6 +39,7 @@ import '../../state/settings_controller.dart';
 import '../../theme/app_theme.dart';
 import 'poll_widgets.dart';
 import 'location_contact_widgets.dart';
+import 'safety_number_sheet.dart';
 import '../../widgets/brand.dart';
 import '../../widgets/verified_badge.dart';
 import '../../widgets/swipe_to_reply.dart';
@@ -1574,10 +1575,14 @@ class _ChatScreenState extends State<ChatScreen> {
               unawaited(_exportChat());
             } else if (v == 'ttl') {
               _showDisappearSheet();
+            } else if (v == 'safety') {
+              // audit 2026-10-25 — the REAL pairwise safety number,
+              // from the identities the ratchet sessions actually use.
+              unawaited(showSafetyNumberSheet(context, widget.chat));
             }
           },
-          itemBuilder: (_) => const [
-            PopupMenuItem(
+          itemBuilder: (_) => [
+            const PopupMenuItem(
               value: 'media',
               child: ListTile(
                 contentPadding: EdgeInsets.zero,
@@ -1586,7 +1591,7 @@ class _ChatScreenState extends State<ChatScreen> {
                 title: Text('وسائط المحادثة'),
               ),
             ),
-            PopupMenuItem(
+            const PopupMenuItem(
               value: 'export',
               child: ListTile(
                 contentPadding: EdgeInsets.zero,
@@ -1595,7 +1600,7 @@ class _ChatScreenState extends State<ChatScreen> {
                 title: Text('تصدير المحادثة'),
               ),
             ),
-            PopupMenuItem(
+            const PopupMenuItem(
               value: 'ttl',
               child: ListTile(
                 contentPadding: EdgeInsets.zero,
@@ -1604,6 +1609,17 @@ class _ChatScreenState extends State<ChatScreen> {
                 title: Text('الرسائل المؤقتة'),
               ),
             ),
+            // audit 2026-10-25 — per-chat verification entry point.
+            if (!widget.chat.isGroup)
+              const PopupMenuItem(
+                value: 'safety',
+                child: ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  dense: true,
+                  leading: Icon(Icons.fingerprint),
+                  title: Text('رقم الأمان'),
+                ),
+              ),
           ],
         ),
         const SizedBox(width: 4),
