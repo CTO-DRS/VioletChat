@@ -52,27 +52,25 @@ void main() {
     expect(await LocalDatabase.openText(b!), 'same text');
   });
 
-  test('corrupted sealed blob fails CLOSED (null, never ciphertext)',
-      () async {
-    final sealed = (await LocalDatabase.sealText('secret'))!;
-    // Flip a byte in the ciphertext section.
-    final chars = sealed.split('');
-    final last = chars.length - 1;
-    chars[last] = chars[last] == 'A' ? 'B' : 'A';
-    final corrupted = chars.join();
-    expect(await LocalDatabase.openText(corrupted), isNull);
-  });
-
-  test('marker-shaped garbage fails closed; marker-prefixed prose passes',
-      () async {
+  test('marked-but-unopenable values ALWAYS fail closed', () async {
     // SHAPE-valid blob (12-byte-looking nonce + payload) but bad MAC →
     // fail closed.
     final garbage = 'enc1:${'A' * 16}|${'B' * 24}';
     expect(await LocalDatabase.openText(garbage), isNull);
-    // A user literally typed «enc1: …» — not blob-shaped (spaces) →
-    // passthrough, never hidden.
+    // Trailing char replaced with a DIFFERENT one (CI-caught corruption
+    // class) → invalid base64 or MAC mismatch → fail closed, never the
+    // raw ciphertext.
+    final sealed = (await LocalDatabase.sealText('secret'))!;
+    final last = sealed.substring(sealed.length - 1);
+    final flipped =
+        sealed.substring(0, sealed.length - 1) + (last == 'A' ? 'B' : 'A');
+    expect(flipped != sealed, isTrue);
+    expect(await LocalDatabase.openText(flipped), isNull);
+    // Even marker-prefixed PROSE fails closed: once the marker is
+    // present the reader only accepts blobs (documented residual edge
+    // for legacy rows; new rows are sealed at write time).
     const prose = 'enc1: هذا نص مستخدم عادي ليس blob';
-    expect(await LocalDatabase.openText(prose), prose);
+    expect(await LocalDatabase.openText(prose), isNull);
   });
 
   test('empty and null seal passthrough', () async {

@@ -237,9 +237,6 @@ class LocalDatabase {
   // ------------------------------------------------------------------
   static const String _encMarker = 'enc1:';
 
-  static final RegExp _encShape =
-      RegExp(r'^enc1:[A-Za-z0-9+/]+={0,2}\|[A-Za-z0-9+/]+={0,2}$');
-
   /// Seal user content (message text / media JSON / poll & location &
   /// contact bodies / reply previews) before it touches the database.
   ///
@@ -260,19 +257,22 @@ class LocalDatabase {
   /// - Unmarked values pass through untouched (legacy plaintext rows
   ///   from before this upgrade keep rendering — transparent migration,
   ///   no cache wipe needed).
-  /// - Marked values decrypt; a corrupted marked blob fails CLOSED
-  ///   (null) rather than ever surfacing ciphertext.
+  /// - Marked values MUST open, or the reader fails CLOSED (null):
+  ///   a corrupted blob never surfaces as ciphertext garbage in the
+  ///   UI, and a marked-but-unopenable value is indistinguishable from
+  ///   corruption anyway. CI caught exactly this class — flipping one
+  ///   trailing base64 char of a blob (`…g=A`) must yield null, not
+  ///   the raw string.
   ///
-  /// Residual edge, documented honestly: a legacy plaintext value that
-  /// a USER literally typed starting with `enc1:` and shaped like the
-  /// blob format would be treated as sealed and (failing decryption)
-  /// render empty. Constructing that string by accident is vanishingly
-  /// unlikely; accepting it keeps the reader markerless-per-column and
-  /// the scheme identical to sealJson's trust model.
+  /// Residual edge, documented honestly: a LEGACY (pre-upgrade)
+  /// plaintext message that a user literally typed starting with
+  /// `enc1:` would attempt to unseal and, failing, render empty.
+  /// The write path has always sealed values before storing, so new
+  /// rows cannot hit this; for old rows the collision is vanishingly
+  /// unlikely and the row's other fields still render.
   static Future<String?> openText(String? blob) async {
     if (blob == null || blob.isEmpty) return blob;
     if (!blob.startsWith(_encMarker)) return blob; // legacy plaintext
-    if (!_encShape.hasMatch(blob)) return blob; // marker-prefixed prose
     try {
       final parts = blob.substring(_encMarker.length).split('|');
       if (parts.length != 2) return null;
