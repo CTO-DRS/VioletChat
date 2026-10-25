@@ -54,7 +54,7 @@ void main() {
 
   test('corrupted sealed blob fails CLOSED (null, never ciphertext)',
       () async {
-    final sealed = await LocalDatabase.sealText('secret')!;
+    final sealed = (await LocalDatabase.sealText('secret'))!;
     // Flip a byte in the ciphertext section.
     final chars = sealed.split('');
     final last = chars.length - 1;
